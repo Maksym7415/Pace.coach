@@ -1,0 +1,7 @@
+.env
+.env.production
+__pycache__/
+.venv/
+*.pyc
+.strava_tokens.json
+deploy-cloud-run.sh

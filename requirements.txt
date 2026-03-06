@@ -1,0 +1,14 @@
+flask
+flask-cors
+PyJWT
+bcrypt
+SQLAlchemy
+flask-sqlalchemy
+alembic
+psycopg2-binary
+requests
+python-dotenv
+fitparse
+pandas
+werkzeug
+gunicorn

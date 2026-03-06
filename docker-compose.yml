@@ -1,0 +1,22 @@
+# Local development only: PostgreSQL DB. Run app with: ./run.sh or python -m src.api.app
+# Production: use Supabase for database (see docs/DEPLOYMENT.md)
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: shoe_tracker_db
+    environment:
+      POSTGRES_USER: ${DB_USER:-shoe_tracker}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-shoe_tracker}
+      POSTGRES_DB: ${DB_NAME:-shoe_tracker}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
