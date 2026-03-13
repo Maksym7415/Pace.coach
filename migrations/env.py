@@ -33,7 +33,18 @@ from src.models.models import db
 db.init_app(app)
 
 # Import models so they're registered with db.metadata
-from src.models import User, UserStrava, Shoe, Activity, ActivityShoeDistance  # noqa: F401
+from src.models import (  # noqa: F401
+    User,
+    UserStrava,
+    Shoe,
+    Activity,
+    ActivityShoeDistance,
+    Gear,
+    GearInstallation,
+    GearService,
+    GearServiceLog,
+    ActivityGearUsage,
+)
 
 target_metadata = db.metadata
 

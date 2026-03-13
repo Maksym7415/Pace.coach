@@ -7,22 +7,37 @@ from datetime import datetime, timezone
 import requests
 from sqlalchemy import func
 
-from src.models import db, UserStrava, Activity, ActivityShoeDistance, Shoe
+from src.models import db, UserStrava, Activity, ActivityGearUsage, Gear
 
 STRAVA_API_BASE = "https://www.strava.com/api/v3"
-RUNNING_TYPES = {"Run", "VirtualRun", "Treadmill", "TrailRun", "ObstacleRun"}
+
+RUN_TYPES = {"Run", "VirtualRun", "Treadmill", "TrailRun", "ObstacleRun"}
+BIKE_TYPES = {"Ride", "VirtualRide", "GravelRide", "MountainBikeRide", "EBikeRide"}
+SWIM_TYPES = {"Swim", "PoolSwim", "OpenWaterSwim"}
 
 
-def _is_running(sport_type: str) -> bool:
-    """Check if sport type indicates running."""
+def _map_strava_sport_to_activity_type(sport_type: str) -> str:
+    """Map Strava sport_type to internal activity_type (run, bike, swim, other)."""
     if not sport_type:
-        return False
-    return sport_type in RUNNING_TYPES or sport_type.startswith("Run")
+        return "other"
+    st = sport_type.strip()
+    if st in RUN_TYPES or st.startswith("Run"):
+        return "run"
+    if st in BIKE_TYPES:
+        return "bike"
+    if st in SWIM_TYPES:
+        return "swim"
+    return "other"
+
+
+def _is_supported_sport(sport_type: str) -> bool:
+    """Check if we import this sport (run, bike, swim)."""
+    return _map_strava_sport_to_activity_type(sport_type) in ("run", "bike", "swim")
 
 
 def process_activity_create(owner_id: int, object_id: int, app):
     """
-    Background task: fetch activity from Strava, create in DB if running.
+    Background task: fetch activity from Strava, create in DB for run/bike/swim.
     owner_id = Strava athlete ID, object_id = Strava activity ID.
     """
     def run():
@@ -45,13 +60,16 @@ def process_activity_create(owner_id: int, object_id: int, app):
                 if resp.status_code != 200:
                     return
                 data = resp.json()
-                # Avoid duplicate import
                 if db.session.query(Activity).filter_by(strava_activity_id=object_id).first():
                     return
-                if not _is_running(data.get("type") or data.get("sport_type", "")):
+                sport_type = data.get("type") or data.get("sport_type", "")
+                if not _is_supported_sport(sport_type):
                     return
+                activity_type = _map_strava_sport_to_activity_type(sport_type)
                 distance_m = data.get("distance") or 0
                 distance_km = round(distance_m / 1000.0, 2)
+                moving_time_sec = data.get("moving_time") or 0
+                moving_hours = round(moving_time_sec / 3600.0, 2) if moving_time_sec else None
                 name = data.get("name") or "Strava Activity"
                 start = data.get("start_date") or data.get("start_date_local")
                 if start:
@@ -67,27 +85,36 @@ def process_activity_create(owner_id: int, object_id: int, app):
                     user_id=us.user_id,
                     name=name,
                     date=date,
-                    total_distance_km=distance_km,
+                    total_distance_km=distance_km if distance_km else 0,
+                    total_hours=moving_hours,
+                    activity_type=activity_type,
                     source="strava",
                     strava_activity_id=object_id,
                 )
                 db.session.add(activity)
                 db.session.flush()
 
-                default_shoe = db.session.query(Shoe).filter_by(user_id=us.user_id, is_default=True).first()
-                if default_shoe:
-                    db.session.add(
-                        ActivityShoeDistance(
-                            activity_id=activity.id,
-                            shoe_id=default_shoe.id,
-                            distance_km=distance_km,
+                default_gear = db.session.query(Gear).filter_by(
+                    user_id=us.user_id,
+                    activity_type=activity_type,
+                    is_default=True,
+                    status="active",
+                ).first()
+                if default_gear:
+                    value = distance_km if activity_type == "run" else (moving_hours or distance_km)
+                    if value and value > 0:
+                        db.session.add(
+                            ActivityGearUsage(
+                                activity_id=activity.id,
+                                gear_id=default_gear.id,
+                                value=value,
+                            )
                         )
-                    )
-                    db.session.flush()
-                    total = db.session.query(
-                        func.coalesce(func.sum(ActivityShoeDistance.distance_km), 0)
-                    ).filter_by(shoe_id=default_shoe.id).scalar()
-                    default_shoe.distance_covered_km = round(float(total), 2)
+                        db.session.flush()
+                        total = db.session.query(
+                            func.coalesce(func.sum(ActivityGearUsage.value), 0)
+                        ).filter_by(gear_id=default_gear.id).scalar()
+                        default_gear.value_covered = round(float(total), 2)
 
                 db.session.commit()
             except Exception:
