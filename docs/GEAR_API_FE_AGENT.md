@@ -306,6 +306,54 @@ Same as create: parent must exist, must not be a component, gear cannot be its o
 
 ---
 
+## Default Gear
+
+### Set default
+
+**`PUT /api/gear/:id/default`**
+
+Marks this gear as the default for **its current `activity_type`**. Any other gear for the same user and same `activity_type` has `is_default` cleared. **No request body.**
+
+Use when the user sets “default” in the UI. This is **not** done via `PUT /api/gear/:id` (update gear does not accept `is_default`).
+
+**Response (200):** Same shape as below; returned gear has `"is_default": true`.
+
+### Clear default
+
+**`DELETE /api/gear/:id/default`**
+
+Sets **`is_default`** to **`false`** on this gear if it was set. **No request body.** Idempotent: if this gear was not default, responds **200** with the current gear unchanged.
+
+After this call, that user may have **no** default gear for this gear’s `activity_type` (until they call **`PUT /api/gear/:id/default`** on some gear again).
+
+**Response (200):**
+
+```json
+{
+  "success": true,
+  "gear": {
+    "id": 12,
+    "activity_type": "run",
+    "gear_type": "shoe",
+    "brand": "Nike",
+    "model": "Pegasus",
+    "nick": null,
+    "metric_type": "distance",
+    "max_value": 800,
+    "value_covered": 120.5,
+    "is_default": false,
+    "status": "active",
+    "created_at": "2026-03-11T10:00:00"
+  }
+}
+```
+
+### Errors
+
+- **404** — Gear not found or not owned by the user: `{"success": false, "error": "Gear not found"}`
+
+---
+
 ## Delete Gear
 
 **`DELETE /api/gear/:id`**
@@ -702,7 +750,7 @@ Assigns gear to the activity. Use `excluded_component_ids` to **deactivate** com
 
 ## Summary
 
-**Gear CRUD:** `GET /api/gear` (list), `GET /api/gear/:id` (get), `POST /api/gear` (create), `PUT /api/gear/:id` (update/edit), `DELETE /api/gear/:id` (delete)
+**Gear CRUD:** `GET /api/gear` (list), `GET /api/gear/:id` (get), `POST /api/gear` (create), `PUT /api/gear/:id` (update/edit), `PUT /api/gear/:id/default` / `DELETE /api/gear/:id/default` (set or clear default for this gear; no body), `DELETE /api/gear/:id` (delete gear)
 
 **Parent gear components:** `GET /api/gear/:id/components` – list components installed on a parent gear (shoe/bike)
 

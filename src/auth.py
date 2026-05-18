@@ -3,32 +3,67 @@ JWT authentication helpers.
 """
 from datetime import datetime, timedelta, timezone
 from functools import wraps
+from typing import Any, Dict, Optional
 
 import jwt
 from flask import request, jsonify
 
-from src.config import JWT_SECRET, JWT_EXPIRY_HOURS
+from src.config import JWT_SECRET, JWT_EXPIRY_HOURS, JWT_AUDIENCE
+
+
+def _jwt_base_claims() -> Dict[str, Any]:
+    """Common JWT claims (issuer, issued-at)."""
+    now = datetime.now(timezone.utc)
+    # Use a simple issuer string; in the future this could be derived from config.
+    return {
+        "iss": "shoe-tracker-backend",
+        "iat": now,
+    }
 
 
 def create_token(user_id: int) -> str:
     """Create a JWT for the given user_id."""
-    payload = {
-        "sub": str(user_id),  # RFC 7519 requires sub to be a string
-        "exp": datetime.now(timezone.utc) + timedelta(hours=JWT_EXPIRY_HOURS),
-        "iat": datetime.now(timezone.utc),
-    }
-    return jwt.encode(payload, JWT_SECRET, algorithm="HS256")
+    claims = _jwt_base_claims()
+    claims.update(
+        {
+            "sub": str(user_id),  # RFC 7519 requires sub to be a string
+            "aud": JWT_AUDIENCE,
+            "exp": datetime.now(timezone.utc) + timedelta(hours=JWT_EXPIRY_HOURS),
+        }
+    )
+    return jwt.encode(claims, JWT_SECRET, algorithm="HS256")
 
 
-def decode_token(token: str) -> int | None:
+def decode_token(token: str) -> Optional[int]:
     """Decode JWT and return user_id, or None if invalid."""
+    common = {
+        "algorithms": ["HS256"],
+        "issuer": "shoe-tracker-backend",
+    }
     try:
-        payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
-        sub = payload.get("sub")
-        if sub is None:
-            return None
-        return int(sub)
+        payload = jwt.decode(
+            token,
+            JWT_SECRET,
+            audience=JWT_AUDIENCE,
+            **common,
+        )
     except jwt.InvalidTokenError:
+        try:
+            # Tokens minted before `aud` was added
+            payload = jwt.decode(
+                token,
+                JWT_SECRET,
+                options={"verify_aud": False},
+                **common,
+            )
+        except jwt.InvalidTokenError:
+            return None
+    sub = payload.get("sub")
+    if sub is None:
+        return None
+    try:
+        return int(sub)
+    except (TypeError, ValueError):
         return None
 
 

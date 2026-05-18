@@ -1,8 +1,12 @@
 """
 Strava webhook: verify subscription and handle activity create/update events.
 """
+import logging
+import queue
 import threading
+import time
 from datetime import datetime, timezone
+from typing import Callable, Any
 
 import requests
 from sqlalchemy import func
@@ -14,6 +18,31 @@ STRAVA_API_BASE = "https://www.strava.com/api/v3"
 RUN_TYPES = {"Run", "VirtualRun", "Treadmill", "TrailRun", "ObstacleRun"}
 BIKE_TYPES = {"Ride", "VirtualRide", "GravelRide", "MountainBikeRide", "EBikeRide"}
 SWIM_TYPES = {"Swim", "PoolSwim", "OpenWaterSwim"}
+
+logger = logging.getLogger("shoe_tracker.webhook")
+
+
+def _fetch_strava_activity(access_token: str, object_id: int):
+    """GET activity from Strava with simple backoff on rate limits / 5xx."""
+    url = f"{STRAVA_API_BASE}/activities/{object_id}"
+    headers = {"Authorization": f"Bearer {access_token}"}
+    last_resp = None
+    for attempt in range(3):
+        if attempt:
+            time.sleep(1.5 * attempt)
+        last_resp = requests.get(url, headers=headers, timeout=15)
+        if last_resp.status_code == 200:
+            return last_resp
+        if last_resp.status_code == 429 or last_resp.status_code >= 500:
+            logger.warning(
+                "Strava activity fetch retryable status=%s object_id=%s attempt=%s",
+                last_resp.status_code,
+                object_id,
+                attempt,
+            )
+            continue
+        return last_resp
+    return last_resp
 
 
 def _map_strava_sport_to_activity_type(sport_type: str) -> str:
@@ -35,35 +64,79 @@ def _is_supported_sport(sport_type: str) -> bool:
     return _map_strava_sport_to_activity_type(sport_type) in ("run", "bike", "swim")
 
 
+_task_queue: "queue.Queue[tuple[Callable[..., Any], tuple[Any, ...], dict[str, Any]]]" = queue.Queue()
+_worker_started = False
+_worker_lock = threading.Lock()
+
+
+def _ensure_worker() -> None:
+    """Start a single background worker thread for webhook tasks."""
+    global _worker_started
+    if _worker_started:
+        return
+    with _worker_lock:
+        if _worker_started:
+            return
+
+        def _worker() -> None:
+            while True:
+                func_, args, kwargs = _task_queue.get()
+                try:
+                    func_(*args, **kwargs)
+                except Exception:
+                    # Errors are logged inside task functions; just avoid crashing the loop.
+                    logger.exception("Unhandled exception in webhook worker")
+                finally:
+                    _task_queue.task_done()
+
+        t = threading.Thread(target=_worker, name="strava-webhook-worker", daemon=True)
+        t.start()
+        _worker_started = True
+
+
+def _enqueue_task(func_: Callable[..., Any], *args: Any, **kwargs: Any) -> None:
+    """Enqueue a background task for the webhook worker."""
+    _ensure_worker()
+    _task_queue.put((func_, args, kwargs))
+
+
 def process_activity_create(owner_id: int, object_id: int, app):
     """
     Background task: fetch activity from Strava, create in DB for run/bike/swim.
     owner_id = Strava athlete ID, object_id = Strava activity ID.
     """
-    def run():
+
+    def _task() -> None:
         from src.services.strava_service import StravaService
+
         with app.app_context():
             try:
+                logger.info("Processing Strava create event owner_id=%s object_id=%s", owner_id, object_id)
                 us = db.session.query(UserStrava).filter_by(strava_athlete_id=owner_id).first()
                 if not us:
+                    logger.info("No UserStrava mapping found for owner_id=%s", owner_id)
                     return
                 svc = StravaService(db.session)
                 tokens = svc.get_tokens(us.user_id)
                 if not tokens:
+                    logger.warning("No valid Strava tokens for user_id=%s", us.user_id)
                     return
                 access_token = tokens["access_token"]
-                resp = requests.get(
-                    f"{STRAVA_API_BASE}/activities/{object_id}",
-                    headers={"Authorization": f"Bearer {access_token}"},
-                    timeout=10,
-                )
+                resp = _fetch_strava_activity(access_token, object_id)
                 if resp.status_code != 200:
+                    logger.warning(
+                        "Failed to fetch Strava activity id=%s status=%s",
+                        object_id,
+                        resp.status_code,
+                    )
                     return
                 data = resp.json()
-                if db.session.query(Activity).filter_by(strava_activity_id=object_id).first():
+                if db.session.query(Activity).filter_by(strava_activity_id=object_id, user_id=us.user_id).first():
+                    logger.info("Activity already exists for user_id=%s strava_activity_id=%s", us.user_id, object_id)
                     return
                 sport_type = data.get("type") or data.get("sport_type", "")
                 if not _is_supported_sport(sport_type):
+                    logger.info("Skipping unsupported Strava sport_type=%s", sport_type)
                     return
                 activity_type = _map_strava_sport_to_activity_type(sport_type)
                 distance_m = data.get("distance") or 0
@@ -77,6 +150,7 @@ def process_activity_create(owner_id: int, object_id: int, app):
                         dt = datetime.fromisoformat(start.replace("Z", "+00:00"))
                         date = dt.date()
                     except (ValueError, TypeError):
+                        logger.warning("Invalid start_date from Strava; defaulting to current date")
                         date = datetime.now(timezone.utc).date()
                 else:
                     date = datetime.now(timezone.utc).date()
@@ -117,13 +191,12 @@ def process_activity_create(owner_id: int, object_id: int, app):
                         default_gear.value_covered = round(float(total), 2)
 
                 db.session.commit()
+                logger.info("Created Strava activity user_id=%s activity_id=%s", us.user_id, activity.id)
             except Exception:
+                logger.exception("Error while processing Strava create event owner_id=%s object_id=%s", owner_id, object_id)
                 db.session.rollback()
-                raise
 
-    t = threading.Thread(target=run)
-    t.daemon = True
-    t.start()
+    _enqueue_task(_task)
 
 
 def process_activity_update(owner_id: int, object_id: int, updates: dict, app):
@@ -131,11 +204,21 @@ def process_activity_update(owner_id: int, object_id: int, updates: dict, app):
     Background task: update activity title in DB when Strava sends an update event.
     owner_id = Strava athlete ID, object_id = Strava activity ID, updates = dict with changed fields.
     """
-    def run():
+
+    def _task() -> None:
         with app.app_context():
             try:
-                activity = db.session.query(Activity).filter_by(strava_activity_id=object_id).first()
+                logger.info("Processing Strava update event owner_id=%s object_id=%s", owner_id, object_id)
+                us = db.session.query(UserStrava).filter_by(strava_athlete_id=owner_id).first()
+                if not us:
+                    logger.info("No UserStrava mapping for Strava update owner_id=%s", owner_id)
+                    return
+                activity = db.session.query(Activity).filter_by(
+                    strava_activity_id=object_id,
+                    user_id=us.user_id,
+                ).first()
                 if not activity:
+                    logger.info("No existing activity for Strava update object_id=%s user_id=%s", object_id, us.user_id)
                     return
                 new_title = updates.get("title")
                 if new_title is None:
@@ -144,10 +227,9 @@ def process_activity_update(owner_id: int, object_id: int, updates: dict, app):
                 if new_title:
                     activity.name = new_title
                     db.session.commit()
+                    logger.info("Updated activity title for activity_id=%s", activity.id)
             except Exception:
+                logger.exception("Error while processing Strava update event owner_id=%s object_id=%s", owner_id, object_id)
                 db.session.rollback()
-                raise
 
-    t = threading.Thread(target=run)
-    t.daemon = True
-    t.start()
+    _enqueue_task(_task)

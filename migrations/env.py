@@ -36,9 +36,7 @@ db.init_app(app)
 from src.models import (  # noqa: F401
     User,
     UserStrava,
-    Shoe,
     Activity,
-    ActivityShoeDistance,
     Gear,
     GearInstallation,
     GearService,

@@ -167,6 +167,15 @@ gcloud run deploy shoe-tracker-api \
 
 ---
 
+## Security-related configuration
+
+- Set `APP_ENV=production` on Cloud Run (or equivalent) so missing secrets fail fast, CORS uses only `FRONTEND_WEB_ORIGIN`, and the dev Flask server is never used in production (run via Gunicorn: `gunicorn -b 0.0.0.0:8080 src.api.app:app`).
+- **Required in production**: `JWT_SECRET`, `BACKEND_URL`, Strava variables you rely on (`STRAVA_CLIENT_ID`, `STRAVA_CLIENT_SECRET`, `STRAVA_WEBHOOK_VERIFY_TOKEN`, `STRAVA_REDIRECT_URI`, etc.), and `DATABASE_URL`.
+- Prefer **token encryption at rest** for Strava OAuth tokens: set `ENCRYPTION_KEY` to a Fernet key (see `.env.example`). Manage all secrets via your platform’s secret manager, not committed files.
+- After enabling JWT `aud` verification, existing sessions may need to sign in again once; optional `JWT_AUDIENCE` defaults to `shoe-tracker-api`.
+
+---
+
 ## Deployment Flow (Summary)
 
 ```mermaid

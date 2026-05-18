@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
+from src.crypto_utils import encrypt_value, decrypt_value
 from src.models import User, UserStrava
 from src.strava_client import StravaOAuthClient
 
@@ -59,8 +60,8 @@ class StravaService:
         existing = self.db.query(UserStrava).filter_by(user_id=user_id).first()
         if existing:
             existing.strava_athlete_id = strava_athlete_id
-            existing.access_token = token_data["access_token"]
-            existing.refresh_token = token_data["refresh_token"]
+            existing.access_token = encrypt_value(token_data["access_token"])
+            existing.refresh_token = encrypt_value(token_data["refresh_token"])
             existing.token_expires_at = token_expires_at
             self.db.commit()
             return existing
@@ -68,8 +69,8 @@ class StravaService:
         us = UserStrava(
             user_id=user_id,
             strava_athlete_id=strava_athlete_id,
-            access_token=token_data["access_token"],
-            refresh_token=token_data["refresh_token"],
+            access_token=encrypt_value(token_data["access_token"]),
+            refresh_token=encrypt_value(token_data["refresh_token"]),
             token_expires_at=token_expires_at,
         )
         self.db.add(us)
@@ -90,19 +91,22 @@ class StravaService:
             expires_at = expires_at.replace(tzinfo=timezone.utc)
         if expires_at > datetime.now(timezone.utc):
             return {
-                "access_token": us.access_token,
+                "access_token": decrypt_value(us.access_token),
                 "athlete": {"id": us.strava_athlete_id},
             }
         # Refresh
-        token_data = self.oauth.refresh_access_token(us.refresh_token)
-        us.access_token = token_data["access_token"]
-        us.refresh_token = token_data.get("refresh_token", us.refresh_token)
+        token_data = self.oauth.refresh_access_token(decrypt_value(us.refresh_token))
+        us.access_token = encrypt_value(token_data["access_token"])
+        # If a new refresh token is not provided, keep the existing (already encrypted) one.
+        new_refresh = token_data.get("refresh_token")
+        if new_refresh:
+            us.refresh_token = encrypt_value(new_refresh)
         expires_at = token_data.get("expires_at")
         if expires_at:
             us.token_expires_at = _strava_expires_at_to_datetime(expires_at)
         self.db.commit()
         return {
-            "access_token": us.access_token,
+            "access_token": decrypt_value(us.access_token),
             "athlete": token_data.get("athlete", {"id": us.strava_athlete_id}),
         }
 

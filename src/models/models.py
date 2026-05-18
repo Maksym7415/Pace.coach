@@ -2,7 +2,10 @@
 SQLAlchemy models for Shoe Tracker.
 """
 from datetime import datetime
+
 from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy import Index, text
+
 db = SQLAlchemy()
 
 
@@ -23,7 +26,6 @@ class User(db.Model):
 
     # Relationships
     user_strava = db.relationship("UserStrava", back_populates="user", uselist=False)
-    shoes = db.relationship("Shoe", back_populates="user", cascade="all, delete-orphan")
     gear = db.relationship("Gear", back_populates="user", cascade="all, delete-orphan")
     activities = db.relationship("Activity", back_populates="user", cascade="all, delete-orphan")
 
@@ -40,27 +42,6 @@ class UserStrava(db.Model):
     token_expires_at = db.Column(db.DateTime, nullable=False)
 
     user = db.relationship("User", back_populates="user_strava")
-
-
-class Shoe(db.Model):
-    """Shoe entry for a user."""
-    __tablename__ = "shoes"
-
-    id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
-    activity_type = db.Column(db.String(64), nullable=False)  # e.g. "running", "walking"
-    brand = db.Column(db.String(128), nullable=False)
-    model = db.Column(db.String(128), nullable=False)
-    nick = db.Column(db.String(128), nullable=True)
-    max_distance_km = db.Column(db.Float, nullable=True)
-    distance_covered_km = db.Column(db.Float, default=0.0, nullable=False)
-    is_default = db.Column(db.Boolean, default=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-
-    user = db.relationship("User", back_populates="shoes")
-    activity_shoe_distances = db.relationship(
-        "ActivityShoeDistance", back_populates="shoe", cascade="all, delete-orphan"
-    )
 
 
 class Activity(db.Model):
@@ -80,27 +61,20 @@ class Activity(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     user = db.relationship("User", back_populates="activities")
-    activity_shoe_distances = db.relationship(
-        "ActivityShoeDistance", back_populates="activity", cascade="all, delete-orphan"
-    )
     activity_gear_usages = db.relationship(
         "ActivityGearUsage", back_populates="activity", cascade="all, delete-orphan"
     )
 
-
-class ActivityShoeDistance(db.Model):
-    """Distance for a shoe: either from an activity (activity_id set) or manual edit (activity_id null)."""
-    __tablename__ = "activity_shoe_distance"
-
-    id = db.Column(db.Integer, primary_key=True)
-    activity_id = db.Column(
-        db.Integer, db.ForeignKey("activities.id", ondelete="CASCADE"), nullable=True, index=True
+    __table_args__ = (
+        # One Strava activity id per user when imported (NULL strava_activity_id allowed for manual rows).
+        Index(
+            "uq_activities_user_strava_activity",
+            "user_id",
+            "strava_activity_id",
+            unique=True,
+            postgresql_where=text("strava_activity_id IS NOT NULL"),
+        ),
     )
-    shoe_id = db.Column(db.Integer, db.ForeignKey("shoes.id", ondelete="CASCADE"), nullable=False, index=True)
-    distance_km = db.Column(db.Float, nullable=False)
-
-    activity = db.relationship("Activity", back_populates="activity_shoe_distances")
-    shoe = db.relationship("Shoe", back_populates="activity_shoe_distances")
 
 
 class Gear(db.Model):

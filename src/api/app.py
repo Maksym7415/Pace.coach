@@ -3,6 +3,7 @@
 Flask REST API for Shoe Tracker
 """
 from datetime import datetime, timedelta, timezone
+import logging
 import os
 import secrets
 import sys
@@ -18,14 +19,16 @@ from flask_cors import CORS
 project_root = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(project_root))
 
-from src.config import DATABASE_URL, STRAVA_FRONTEND_REDIRECT_URL
+from src.config import (
+    APP_ENV,
+    DATABASE_URL,
+    STRAVA_FRONTEND_REDIRECT_URL,
+)
 from src.models import (
     db,
     User,
     UserStrava,
-    Shoe,
     Activity,
-    ActivityShoeDistance,
     Gear,
     GearInstallation,
     GearService,
@@ -33,13 +36,62 @@ from src.models import (
     ActivityGearUsage,
 )
 from src.auth import create_token, require_auth
+from src.api.validation import validate_password
+from src.rate_limit import (
+    FORGOT_PASSWORD_MAX_PER_WINDOW,
+    FORGOT_PASSWORD_WINDOW_SEC,
+    LOGIN_MAX_PER_WINDOW,
+    LOGIN_WINDOW_SEC,
+    REGISTER_MAX_PER_WINDOW,
+    REGISTER_WINDOW_SEC,
+    is_rate_limited,
+)
 from src.services.strava_service import StravaService
 from src.services.webhook_handler import process_activity_create, process_activity_update
 from src.config import STRAVA_WEBHOOK_VERIFY_TOKEN
 
+# Logging configuration
+LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
+logging.basicConfig(
+    level=LOG_LEVEL,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
+logger = logging.getLogger("shoe_tracker.api")
+
 # Create Flask app
 app = Flask(__name__)
-CORS(app)
+
+_CORS_KWARGS = {
+    "supports_credentials": False,
+    "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    "allow_headers": ["Authorization", "Content-Type"],
+}
+
+# CORS: for mobile React Native clients CORS is mostly irrelevant, but for any
+# web frontends we restrict origins based on environment.
+_frontend_origin = os.environ.get("FRONTEND_WEB_ORIGIN")
+if APP_ENV.lower() == "development":
+    # In development, allow localhost tooling and optional custom origin.
+    dev_origins = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ]
+    if _frontend_origin:
+        dev_origins.append(_frontend_origin)
+    CORS(app, resources={r"/api/*": {"origins": dev_origins}}, **_CORS_KWARGS)
+else:
+    # In non-development environments, require an explicit origin; if none is
+    # configured we default to no cross-origin browser access.
+    if _frontend_origin:
+        CORS(app, resources={r"/api/*": {"origins": [_frontend_origin]}}, **_CORS_KWARGS)
+
+
+def _hash_password(plain: str) -> str:
+    return bcrypt.hashpw(plain.encode("utf-8"), bcrypt.gensalt(rounds=12)).decode("utf-8")
+
+
+def _auth_rate_key(endpoint: str) -> str:
+    return f"{endpoint}:{request.remote_addr or 'unknown'}"
 
 app.config["SQLALCHEMY_DATABASE_URI"] = DATABASE_URL
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
@@ -93,10 +145,18 @@ def register():
     if not email or not password or not name:
         return jsonify({"success": False, "error": "email, password, and name are required"}), 400
 
+    pw_err = validate_password(password)
+    if pw_err:
+        return jsonify({"success": False, "error": pw_err}), 400
+
+    if is_rate_limited(_auth_rate_key("register"), REGISTER_MAX_PER_WINDOW, REGISTER_WINDOW_SEC):
+        logger.warning("Register rate limit exceeded for %s", request.remote_addr)
+        return jsonify({"success": False, "error": "Too many requests. Try again later."}), 429
+
     if User.query.filter_by(email=email).first():
         return jsonify({"success": False, "error": "Email already registered"}), 409
 
-    password_hash = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+    password_hash = _hash_password(password)
     user = User(email=email, password_hash=password_hash, name=name)
     db.session.add(user)
     db.session.commit()
@@ -119,10 +179,16 @@ def login():
     if not email or not password:
         return jsonify({"success": False, "error": "email and password are required"}), 400
 
+    if is_rate_limited(_auth_rate_key("login"), LOGIN_MAX_PER_WINDOW, LOGIN_WINDOW_SEC):
+        logger.warning("Login rate limit exceeded for %s", request.remote_addr)
+        return jsonify({"success": False, "error": "Too many requests. Try again later."}), 429
+
     user = User.query.filter_by(email=email).first()
     if not user or not bcrypt.checkpw(password.encode("utf-8"), user.password_hash.encode("utf-8")):
+        logger.info("Failed login attempt for email=%s", email)
         return jsonify({"success": False, "error": "Invalid email or password"}), 401
 
+    logger.info("Successful login user_id=%s", user.id)
     token = create_token(user.id)
     return jsonify({
         "success": True,
@@ -138,6 +204,14 @@ def forgot_password():
     email = (data.get("email") or "").strip().lower()
     if not email:
         return jsonify({"success": False, "error": "email is required"}), 400
+
+    if is_rate_limited(
+        _auth_rate_key("forgot-password"),
+        FORGOT_PASSWORD_MAX_PER_WINDOW,
+        FORGOT_PASSWORD_WINDOW_SEC,
+    ):
+        logger.warning("Forgot-password rate limit exceeded for %s", request.remote_addr)
+        return jsonify({"success": True, "message": "If the email exists, a reset link was sent"})
 
     user = User.query.filter_by(email=email).first()
     if user:
@@ -159,13 +233,17 @@ def reset_password():
     if not token or not new_password:
         return jsonify({"success": False, "error": "token and new_password are required"}), 400
 
+    pw_err = validate_password(new_password)
+    if pw_err:
+        return jsonify({"success": False, "error": pw_err}), 400
+
     user = User.query.filter_by(password_reset_token=token).first()
     if not user:
         return jsonify({"success": False, "error": "Invalid or expired reset token"}), 400
     if user.password_reset_expires_at and user.password_reset_expires_at < datetime.now(timezone.utc):
         return jsonify({"success": False, "error": "Reset token has expired"}), 400
 
-    user.password_hash = bcrypt.hashpw(new_password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+    user.password_hash = _hash_password(new_password)
     user.password_reset_token = None
     user.password_reset_expires_at = None
     db.session.commit()
@@ -218,8 +296,9 @@ def strava_connect():
     try:
         url = svc.get_authorize_url(request.user.id, redirect_uri=redirect_uri)
         return jsonify({"success": True, "authorize_url": url})
-    except Exception as exc:
-        return jsonify({"success": False, "error": str(exc)}), 500
+    except Exception:
+        logger.exception("Strava connect URL error")
+        return jsonify({"success": False, "error": "Could not build Strava authorization URL."}), 500
 
 
 @app.route("/api/strava/authorize", methods=["GET"])
@@ -268,13 +347,15 @@ def strava_callback():
     try:
         us = svc.exchange_code(code, state)
     except requests.RequestException as exc:
+        logger.warning("Strava token exchange failed: %s", exc)
         if request.method == "GET":
             return redirect(_get_redirect_uri(state))
-        return jsonify({"success": False, "error": str(exc)}), 502
-    except Exception as exc:
+        return jsonify({"success": False, "error": "Strava authorization failed. Please try again."}), 502
+    except Exception:
+        logger.exception("Strava callback error")
         if request.method == "GET":
             return redirect(_get_redirect_uri(state))
-        return jsonify({"success": False, "error": str(exc)}), 500
+        return jsonify({"success": False, "error": "Strava authorization failed. Please try again."}), 500
 
     if not us:
         if request.method == "GET":
@@ -363,17 +444,6 @@ def _recompute_gear_value_covered(gear_id):
         gear_id=gear_id
     ).scalar()
     gear.value_covered = round(float(total), 2)
-
-
-def _recompute_shoe_distance_covered(shoe_id):
-    """Legacy: Set shoe.distance_covered_km. Prefer _recompute_gear_value_covered for gear."""
-    shoe = Shoe.query.get(shoe_id)
-    if not shoe:
-        return
-    total = db.session.query(func.coalesce(func.sum(ActivityShoeDistance.distance_km), 0)).filter_by(
-        shoe_id=shoe_id
-    ).scalar()
-    shoe.distance_covered_km = round(float(total), 2)
 
 
 # --- Shoes (legacy API: delegates to gear with gear_type='shoe') ---
@@ -995,6 +1065,19 @@ def set_default_gear(gear_id):
     return jsonify({"success": True, "gear": _gear_to_json(gear)})
 
 
+@app.route("/api/gear/<int:gear_id>/default", methods=["DELETE"])
+@require_auth
+def unset_default_gear(gear_id):
+    """Clear default flag on this gear if set. Idempotent."""
+    gear = Gear.query.filter_by(id=gear_id, user_id=request.user.id).first()
+    if not gear:
+        return jsonify({"success": False, "error": "Gear not found"}), 404
+    if gear.is_default:
+        gear.is_default = False
+        db.session.commit()
+    return jsonify({"success": True, "gear": _gear_to_json(gear)})
+
+
 @app.route("/api/gear/<int:gear_id>/components", methods=["GET"])
 @require_auth
 def get_gear_components(gear_id):
@@ -1304,7 +1387,10 @@ def strava_webhook_verify():
     if not STRAVA_WEBHOOK_VERIFY_TOKEN:
         return jsonify({"error": "Webhook not configured"}), 503
     if verify_token != STRAVA_WEBHOOK_VERIFY_TOKEN:
+        logger.info("Strava webhook verify rejected (bad or missing token)")
         return jsonify({"error": "Invalid verify token"}), 403
+    if challenge is None:
+        return jsonify({"error": "Missing hub.challenge"}), 400
     return jsonify({"hub.challenge": challenge})
 
 
@@ -1314,6 +1400,7 @@ def strava_webhook_event():
     # Strava sends form-urlencoded or JSON
     data = request.get_json(silent=True) or request.form.to_dict()
     if not data:
+        logger.info("Received empty Strava webhook payload")
         return jsonify({"ok": True}), 200
 
     aspect_type = data.get("aspect_type")
@@ -1321,13 +1408,18 @@ def strava_webhook_event():
     owner_id = data.get("owner_id")
     object_id = data.get("object_id")
 
-    if aspect_type == "create" and object_type == "activity" and owner_id and object_id:
+    # Basic validation of required fields
+    if not aspect_type or not object_type or not owner_id or not object_id:
+        logger.warning("Invalid Strava webhook payload: %s", {k: data.get(k) for k in ("aspect_type", "object_type", "owner_id", "object_id")})
+        return jsonify({"ok": True}), 200
+
+    if aspect_type == "create" and object_type == "activity":
         try:
             process_activity_create(int(owner_id), int(object_id), app)
         except (ValueError, TypeError):
             pass
 
-    if aspect_type == "update" and object_type == "activity" and owner_id and object_id:
+    if aspect_type == "update" and object_type == "activity":
         updates = data.get("updates") or {}
         if "title" in updates:
             try:
@@ -1370,7 +1462,7 @@ if __name__ == "__main__":
     print("\nShoes (legacy): GET/POST /api/shoes, GET/PUT/DELETE /api/shoes/:id")
     print("               PUT /api/shoes/:id/default")
     print("\nGear: GET/POST /api/gear, GET/PUT/DELETE /api/gear/:id")
-    print("      PUT /api/gear/:id/default, PUT /api/gear/:id/retire")
+    print("      PUT /api/gear/:id/default, DELETE /api/gear/:id/default, PUT /api/gear/:id/retire")
     print("      POST/DELETE /api/gear/:id/installations")
     print("      GET/POST /api/gear/:id/services, GET/PUT/DELETE /api/gear/:id/services/:sid, POST .../sid/logs")
     print("      GET /api/gear/alerts")
@@ -1379,4 +1471,6 @@ if __name__ == "__main__":
     print("\nWebhook: GET/POST /api/webhooks/strava")
     print("\nServer: http://localhost:8000")
     print("=" * 60)
-    app.run(debug=True, host="0.0.0.0", port=8000)
+    # Debug server: for local development only. In production, run via a WSGI
+    # server such as gunicorn pointing at src.api.app:app.
+    app.run(debug=(APP_ENV.lower() == "development"), host="0.0.0.0", port=8000)
