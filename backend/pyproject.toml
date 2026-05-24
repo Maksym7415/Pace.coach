@@ -1,0 +1,35 @@
+[project]
+name = "coach-app-backend"
+version = "0.1.0"
+description = "Coach App backend API"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "python-multipart",
+    "PyJWT",
+    "bcrypt",
+    "SQLAlchemy>=2.0",
+    "alembic",
+    "psycopg2-binary",
+    "requests",
+    "cryptography",
+    "python-dotenv",
+    "fitparse",
+    "pandas",
+    "gunicorn",
+]
+
+[project.optional-dependencies]
+dev = [
+    "httpx",
+    "pytest",
+]
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]

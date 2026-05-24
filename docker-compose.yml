@@ -1,9 +1,8 @@
-# Local development only: PostgreSQL DB. Run app with: ./run.sh or python -m src.api.app
-# Production: use Supabase for database (see docs/DEPLOYMENT.md)
+# Local development: PostgreSQL + backend + frontend
 services:
   db:
     image: postgres:16-alpine
-    container_name: shoe_tracker_db
+    container_name: coach_app_db
     environment:
       POSTGRES_USER: ${DB_USER:-shoe_tracker}
       POSTGRES_PASSWORD: ${DB_PASSWORD:-shoe_tracker}
@@ -17,6 +16,27 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+
+  backend:
+    build: ./backend
+    container_name: coach_app_backend
+    env_file:
+      - .env
+    environment:
+      DB_HOST: db
+    ports:
+      - "${BACKEND_PORT:-8000}:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  frontend:
+    build: ./frontend
+    container_name: coach_app_frontend
+    ports:
+      - "${FRONTEND_PORT:-5173}:5173"
+    depends_on:
+      - backend
 
 volumes:
   postgres_data:

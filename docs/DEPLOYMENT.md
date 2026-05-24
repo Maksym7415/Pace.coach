@@ -50,11 +50,11 @@ flowchart LR
 
 ### 1.3 Run Migrations Against Supabase
 
-From your project root with `DATABASE_URL` set to the Supabase URI:
+From the repo root with `DATABASE_URL` set to the Supabase URI:
 
 ```bash
 export DATABASE_URL="postgresql://postgres.[PROJECT_REF]:[PASSWORD]@aws-0-[REGION].pooler.supabase.com:6543/postgres"
-alembic upgrade head
+cd backend && alembic -c alembic.ini upgrade head
 ```
 
 ---
@@ -86,16 +86,17 @@ gcloud auth configure-docker
 
 ## Phase 3: Production App Artifacts
 
-### 3.1 Add Production WSGI Server
+### 3.1 Production ASGI Server
 
-Flask dev server is not suitable for production. **Gunicorn** is already added to `requirements.txt`.
+The backend is **FastAPI**. Production runs via **Gunicorn + Uvicorn worker** (see `backend/Dockerfile`).
 
 ### 3.2 Dockerfile
 
-The project includes a `Dockerfile` that:
+`backend/Dockerfile`:
 
 - Uses `python:3.12-slim` base image
-- Binds Gunicorn to `$PORT` (Cloud Run uses 8080 by default)
+- Installs dependencies from `backend/pyproject.toml`
+- Binds Gunicorn + Uvicorn worker to `$PORT` (Cloud Run uses 8080 by default)
 - Uses 1 worker with 8 threads (suitable for Cloud Run's per-instance scaling)
 - Sets `--timeout 0` to avoid killing long-running Strava webhook processing
 
@@ -109,9 +110,11 @@ A `.dockerignore` file excludes `.env`, `.venv`, and other local artifacts from 
 
 ### 4.1 Build and Deploy (from project root)
 
+Deploy from the `backend/` directory context:
+
 ```bash
 gcloud run deploy shoe-tracker-api \
-  --source . \
+  --source backend \
   --region YOUR_REGION \
   --allow-unauthenticated \
   --set-env-vars "DATABASE_URL=postgresql://...,JWT_SECRET=your-secret,BACKEND_URL=https://shoe-tracker-xxx.run.app"
@@ -126,7 +129,7 @@ echo -n "postgresql://..." | gcloud secrets create DATABASE_URL --data-file=-
 
 # Deploy with secrets
 gcloud run deploy shoe-tracker-api \
-  --source . \
+  --source backend \
   --region us-central1 \
   --allow-unauthenticated \
   --set-env-vars "BACKEND_URL=https://shoe-tracker-xxx.run.app,STRAVA_CLIENT_ID=...,STRAVA_CLIENT_SECRET=..." \
@@ -155,7 +158,7 @@ gcloud run deploy shoe-tracker-api \
 2. In Strava API settings:
    - **Authorization Callback Domain**: add the domain (e.g. `shoe-tracker-api-xxx.run.app`)
    - **Webhook**: set callback URL to `https://YOUR_CLOUD_RUN_URL/api/webhooks/strava`
-3. Run `scripts/subscribe_strava.py` to register the webhook subscription (with `BACKEND_URL` and `STRAVA_WEBHOOK_VERIFY_TOKEN` set)
+3. Run `python -m scripts.subscribe_strava` from `backend/` to register the webhook subscription (with `BACKEND_URL` and `STRAVA_WEBHOOK_VERIFY_TOKEN` set)
 
 ---
 
@@ -169,7 +172,7 @@ gcloud run deploy shoe-tracker-api \
 
 ## Security-related configuration
 
-- Set `APP_ENV=production` on Cloud Run (or equivalent) so missing secrets fail fast, CORS uses only `FRONTEND_WEB_ORIGIN`, and the dev Flask server is never used in production (run via Gunicorn: `gunicorn -b 0.0.0.0:8080 src.api.app:app`).
+- Set `APP_ENV=production` on Cloud Run so missing secrets fail fast, CORS uses only `FRONTEND_WEB_ORIGIN`, and the dev server is never used in production (Gunicorn: `gunicorn src.api.app:app -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8080`).
 - **Required in production**: `JWT_SECRET`, `BACKEND_URL`, Strava variables you rely on (`STRAVA_CLIENT_ID`, `STRAVA_CLIENT_SECRET`, `STRAVA_WEBHOOK_VERIFY_TOKEN`, `STRAVA_REDIRECT_URI`, etc.), and `DATABASE_URL`.
 - Prefer **token encryption at rest** for Strava OAuth tokens: set `ENCRYPTION_KEY` to a Fernet key (see `.env.example`). Manage all secrets via your platform’s secret manager, not committed files.
 - After enabling JWT `aud` verification, existing sessions may need to sign in again once; optional `JWT_AUDIENCE` defaults to `shoe-tracker-api`.

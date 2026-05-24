@@ -1,0 +1,22 @@
+Metadata-Version: 2.4
+Name: coach-app-backend
+Version: 0.1.0
+Summary: Coach App backend API
+Requires-Python: >=3.12
+Requires-Dist: fastapi
+Requires-Dist: uvicorn[standard]
+Requires-Dist: python-multipart
+Requires-Dist: PyJWT
+Requires-Dist: bcrypt
+Requires-Dist: SQLAlchemy>=2.0
+Requires-Dist: alembic
+Requires-Dist: psycopg2-binary
+Requires-Dist: requests
+Requires-Dist: cryptography
+Requires-Dist: python-dotenv
+Requires-Dist: fitparse
+Requires-Dist: pandas
+Requires-Dist: gunicorn
+Provides-Extra: dev
+Requires-Dist: httpx; extra == "dev"
+Requires-Dist: pytest; extra == "dev"

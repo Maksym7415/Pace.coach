@@ -5,3 +5,6 @@ __pycache__/
 *.pyc
 .strava_tokens.json
 deploy-cloud-run.sh
+node_modules/
+frontend/dist/
+backend/.pytest_cache/
