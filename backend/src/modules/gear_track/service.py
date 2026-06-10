@@ -26,6 +26,26 @@ def _round_km(value, default=0.0):
         return default
 
 
+def _gear_usage_value(
+    gear: Gear,
+    *,
+    total_distance_km: float = 0.0,
+    total_hours: float | None = None,
+    total_sessions: float | None = None,
+) -> float:
+    """Pick activity usage value for gear based on gear.metric_type."""
+    mt = (gear.metric_type or "distance").strip().lower()
+    if mt == "hours":
+        return _round_km(total_hours, 0.0) or _round_km(total_distance_km, 0.0)
+    if mt == "sessions":
+        return _round_km(total_sessions, 0.0)
+    return (
+        _round_km(total_distance_km, 0.0)
+        or _round_km(total_hours, 0.0)
+        or _round_km(total_sessions, 0.0)
+    )
+
+
 def _gear_to_json(g, components_count=None):
     """JSON for gear (any type). components_count: optional, number of installed components (for list)."""
     out = {
@@ -347,7 +367,12 @@ class GearTrackService:
                 )
             )
             if default_gear:
-                value = total_distance_km if activity_type == "run" else (total_hours or total_distance_km)
+                value = _gear_usage_value(
+                    default_gear,
+                    total_distance_km=total_distance_km,
+                    total_hours=total_hours,
+                    total_sessions=total_sessions,
+                )
                 if value and value > 0:
                     self.db.add(
                         ActivityGearUsage(
@@ -997,7 +1022,12 @@ class GearTrackService:
             if val is not None:
                 val = _round_km(val, 0.0)
             else:
-                val = total_val
+                val = _gear_usage_value(
+                    gear,
+                    total_distance_km=activity.total_distance_km or 0,
+                    total_hours=activity.total_hours,
+                    total_sessions=activity.total_sessions,
+                )
             excluded_component_ids = set(item.get("excluded_component_ids") or [])
             items.append({"gear_id": gid, "value": val, "excluded_component_ids": excluded_component_ids})
 

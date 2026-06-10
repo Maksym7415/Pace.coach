@@ -14,6 +14,7 @@ from sqlalchemy import func
 
 from src.core.database import SessionLocal
 from src.modules.gear_track.models import Activity, ActivityGearUsage, Gear
+from src.modules.gear_track.service import _gear_usage_value
 from src.modules.third_party.strava.models import UserStrava
 
 STRAVA_API_BASE = "https://www.strava.com/api/v3"
@@ -181,7 +182,11 @@ def process_activity_create(owner_id: int, object_id: int) -> None:
                 .first()
             )
             if default_gear:
-                value = distance_km if activity_type == "run" else (moving_hours or distance_km)
+                value = _gear_usage_value(
+                    default_gear,
+                    total_distance_km=distance_km,
+                    total_hours=moving_hours,
+                )
                 if value and value > 0:
                     db.add(
                         ActivityGearUsage(

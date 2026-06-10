@@ -102,7 +102,7 @@ The backend is **FastAPI**. Production runs via **Gunicorn + Uvicorn worker** (s
 
 ### 3.3 .dockerignore
 
-A `.dockerignore` file excludes `.env`, `.venv`, and other local artifacts from the Docker build.
+`backend/.dockerignore` excludes `.env`, `.venv`, and other local artifacts from the Docker build. Cloud Run builds with `--source backend`, so the ignore file must live next to `backend/Dockerfile` (not at the repo root).
 
 ---
 
@@ -110,53 +110,93 @@ A `.dockerignore` file excludes `.env`, `.venv`, and other local artifacts from 
 
 ### 4.1 Build and Deploy (from project root)
 
-Deploy from the `backend/` directory context:
+Deploy using the `backend/` directory as the build context (this picks up `backend/Dockerfile` and Gunicorn + Uvicorn):
 
 ```bash
-gcloud run deploy shoe-tracker-api \
+gcloud run deploy YOUR_SERVICE_NAME \
   --source backend \
   --region YOUR_REGION \
   --allow-unauthenticated \
-  --set-env-vars "DATABASE_URL=postgresql://...,JWT_SECRET=your-secret,BACKEND_URL=https://shoe-tracker-xxx.run.app"
+  --set-env-vars "APP_ENV=production,DATABASE_URL=postgresql://...,JWT_SECRET=your-secret,BACKEND_URL=https://YOUR_SERVICE-xxx.run.app"
 ```
 
-Or use **Secret Manager** for sensitive env vars (recommended):
+Or run `./deploy-cloud-run.sh` after filling in `.env.production` with **non-secret** config (`BACKEND_URL`, `STRAVA_CLIENT_ID`, `STRAVA_REDIRECT_URI`, etc.). Sensitive values are loaded from **Secret Manager** at runtime (see below).
+
+### 4.1a Secret Manager (required for `./deploy-cloud-run.sh`)
+
+Create secrets once (use real values, not placeholders):
 
 ```bash
-# Create secrets first
-echo -n "your-jwt-secret" | gcloud secrets create JWT_SECRET --data-file=-
-echo -n "postgresql://..." | gcloud secrets create DATABASE_URL --data-file=-
+set -a && source .env.production && set +a
 
-# Deploy with secrets
-gcloud run deploy shoe-tracker-api \
-  --source backend \
-  --region us-central1 \
-  --allow-unauthenticated \
-  --set-env-vars "BACKEND_URL=https://shoe-tracker-xxx.run.app,STRAVA_CLIENT_ID=...,STRAVA_CLIENT_SECRET=..." \
-  --set-secrets "DATABASE_URL=DATABASE_URL:latest,JWT_SECRET=JWT_SECRET:latest"
+echo -n "$DATABASE_URL"                | gcloud secrets create DATABASE_URL --data-file=- 2>/dev/null \
+  || echo -n "$DATABASE_URL"           | gcloud secrets versions add DATABASE_URL --data-file=-
+echo -n "$JWT_SECRET"                  | gcloud secrets create JWT_SECRET --data-file=- 2>/dev/null \
+  || echo -n "$JWT_SECRET"             | gcloud secrets versions add JWT_SECRET --data-file=-
+echo -n "$ENCRYPTION_KEY"              | gcloud secrets create ENCRYPTION_KEY --data-file=- 2>/dev/null \
+  || echo -n "$ENCRYPTION_KEY"         | gcloud secrets versions add ENCRYPTION_KEY --data-file=-
+echo -n "$STRAVA_CLIENT_SECRET"        | gcloud secrets create STRAVA_CLIENT_SECRET --data-file=- 2>/dev/null \
+  || echo -n "$STRAVA_CLIENT_SECRET"   | gcloud secrets versions add STRAVA_CLIENT_SECRET --data-file=-
+echo -n "$STRAVA_WEBHOOK_VERIFY_TOKEN" | gcloud secrets create STRAVA_WEBHOOK_VERIFY_TOKEN --data-file=- 2>/dev/null \
+  || echo -n "$STRAVA_WEBHOOK_VERIFY_TOKEN" | gcloud secrets versions add STRAVA_WEBHOOK_VERIFY_TOKEN --data-file=-
 ```
 
-### 4.2 Required Environment Variables
+Grant the Cloud Run runtime service account access (replace with your project number):
 
-| Variable                       | Source                                                  | Required           |
-| ------------------------------ | ------------------------------------------------------- | ------------------ |
-| `DATABASE_URL`                 | Supabase pooled URI                                     | Yes                |
-| `JWT_SECRET`                   | Generate secure random string                           | Yes                |
-| `BACKEND_URL`                  | Cloud Run URL (e.g. `https://shoe-tracker-xxx.run.app`) | Yes                |
-| `STRAVA_CLIENT_ID`             | Strava API                                              | Yes (for Strava)   |
-| `STRAVA_CLIENT_SECRET`         | Strava API                                              | Yes (for Strava)   |
-| `STRAVA_REDIRECT_URI`          | `{BACKEND_URL}/api/strava/callback`                     | Yes (for Strava)   |
-| `STRAVA_WEBHOOK_VERIFY_TOKEN`  | Your chosen token                                       | Yes (for webhooks) |
-| `STRAVA_FRONTEND_REDIRECT_URL` | Frontend callback URL                                   | Yes (for Strava)   |
-| `JWT_EXPIRY_HOURS`             | Optional (default 168)                                  | No                 |
+```bash
+SA="$(gcloud run services describe YOUR_SERVICE_NAME --region YOUR_REGION \
+  --format='value(spec.template.spec.serviceAccountName)')"
+# If empty, use: PROJECT_NUMBER-compute@developer.gserviceaccount.com
+
+for s in DATABASE_URL JWT_SECRET ENCRYPTION_KEY STRAVA_CLIENT_SECRET STRAVA_WEBHOOK_VERIFY_TOKEN; do
+  gcloud secrets add-iam-policy-binding "$s" \
+    --member="serviceAccount:${SA}" \
+    --role="roles/secretmanager.secretAccessor"
+done
+```
+
+Then deploy:
+
+```bash
+./deploy-cloud-run.sh
+```
+
+Manual deploy equivalent:
+
+```bash
+gcloud run deploy YOUR_SERVICE_NAME \
+  --source backend \
+  --region YOUR_REGION \
+  --allow-unauthenticated \
+  --set-env-vars "APP_ENV=production,BACKEND_URL=https://YOUR_SERVICE-xxx.run.app,STRAVA_CLIENT_ID=...,STRAVA_REDIRECT_URI=..." \
+  --set-secrets "DATABASE_URL=DATABASE_URL:latest,JWT_SECRET=JWT_SECRET:latest,ENCRYPTION_KEY=ENCRYPTION_KEY:latest,STRAVA_CLIENT_SECRET=STRAVA_CLIENT_SECRET:latest,STRAVA_WEBHOOK_VERIFY_TOKEN=STRAVA_WEBHOOK_VERIFY_TOKEN:latest"
+```
+
+### 4.2 Environment Variables
+
+| Variable                       | Source / notes                                                                 | Required                    |
+| ------------------------------ | ------------------------------------------------------------------------------ | --------------------------- |
+| `APP_ENV`                      | Set to `production` on Cloud Run (strict env checks, production CORS)          | Yes                         |
+| `DATABASE_URL`                 | Supabase pooled URI — **Secret Manager**                                       | Yes                         |
+| `JWT_SECRET`                   | Generate secure random string — **Secret Manager**                             | Yes                         |
+| `BACKEND_URL`                  | Cloud Run URL (e.g. `https://YOUR_SERVICE-xxx.run.app`)                      | Yes                         |
+| `STRAVA_CLIENT_ID`             | Strava API                                                                     | Yes (for Strava)            |
+| `STRAVA_CLIENT_SECRET`         | Strava API — **Secret Manager**                                                | Yes (for Strava)            |
+| `STRAVA_REDIRECT_URI`          | `{BACKEND_URL}/api/strava/callback` (registered with Strava)                   | Yes (for Strava)            |
+| `STRAVA_WEBHOOK_VERIFY_TOKEN`  | Your chosen token — **Secret Manager**                                         | Yes (for webhooks)          |
+| `FRONTEND_WEB_ORIGIN`          | Browser web app origin for CORS (e.g. `https://app.example.com`)               | Yes (for browser clients)   |
+| `STRAVA_FRONTEND_REDIRECT_URL` | Where `GET /api/strava/callback` redirects after token exchange                | No (defaults to `shoe-tracker://strava/callback` for React Native; set for web OAuth pages) |
+| `ENCRYPTION_KEY`               | Fernet key for Strava token encryption — **Secret Manager** (see `.env.example`) | No (recommended)            |
+| `JWT_EXPIRY_HOURS`             | Token lifetime in hours (default 168)                                          | No                          |
+| `JWT_AUDIENCE`                 | JWT `aud` claim (default `shoe-tracker-api`)                                   | No                          |
 
 ---
 
 ## Phase 5: Strava Webhook Configuration
 
-1. After deployment, note your Cloud Run URL (e.g. `https://shoe-tracker-api-xxx.run.app`)
+1. After deployment, note your Cloud Run URL (e.g. `https://YOUR_SERVICE-xxx.run.app`)
 2. In Strava API settings:
-   - **Authorization Callback Domain**: add the domain (e.g. `shoe-tracker-api-xxx.run.app`)
+   - **Authorization Callback Domain**: add the Cloud Run host (e.g. `YOUR_SERVICE-xxx.run.app`)
    - **Webhook**: set callback URL to `https://YOUR_CLOUD_RUN_URL/api/webhooks/strava`
 3. Run `python -m scripts.subscribe_strava` from `backend/` to register the webhook subscription (with `BACKEND_URL` and `STRAVA_WEBHOOK_VERIFY_TOKEN` set)
 
@@ -172,10 +212,10 @@ gcloud run deploy shoe-tracker-api \
 
 ## Security-related configuration
 
-- Set `APP_ENV=production` on Cloud Run so missing secrets fail fast, CORS uses only `FRONTEND_WEB_ORIGIN`, and the dev server is never used in production (Gunicorn: `gunicorn src.api.app:app -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8080`).
-- **Required in production**: `JWT_SECRET`, `BACKEND_URL`, Strava variables you rely on (`STRAVA_CLIENT_ID`, `STRAVA_CLIENT_SECRET`, `STRAVA_WEBHOOK_VERIFY_TOKEN`, `STRAVA_REDIRECT_URI`, etc.), and `DATABASE_URL`.
-- Prefer **token encryption at rest** for Strava OAuth tokens: set `ENCRYPTION_KEY` to a Fernet key (see `.env.example`). Manage all secrets via your platform’s secret manager, not committed files.
-- After enabling JWT `aud` verification, existing sessions may need to sign in again once; optional `JWT_AUDIENCE` defaults to `shoe-tracker-api`.
+- Always set `APP_ENV=production` on Cloud Run so missing secrets fail fast, CORS is limited to `FRONTEND_WEB_ORIGIN`, and the dev Uvicorn server is never used (production uses Gunicorn: `gunicorn src.api.app:app -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT`).
+- Manage sensitive values (`DATABASE_URL`, `JWT_SECRET`, `ENCRYPTION_KEY`) via **Secret Manager** when possible, not plain `--set-env-vars` or committed files.
+- React Native Strava OAuth does not require `STRAVA_FRONTEND_REDIRECT_URL` unless you override the default deep link (`shoe-tracker://strava/callback`); the app can also pass `redirect_uri` to `GET /api/strava/connect`.
+- After enabling JWT `aud` verification, existing sessions may need to sign in again once.
 
 ---
 

@@ -27,7 +27,7 @@ python -m scripts.subscribe_strava
 
 ## Verification endpoint
 
-The Flask app must respond to Strava’s validation GET with status 200 and body `{"hub.challenge": "<challenge>"}`. This is implemented at `GET /api/webhooks/strava`; ensure `STRAVA_WEBHOOK_VERIFY_TOKEN` matches the token you pass when creating the subscription.
+The FastAPI backend must respond to Strava’s validation GET with status 200 and body `{"hub.challenge": "<challenge>"}`. This is implemented at `GET /api/webhooks/strava`; ensure `STRAVA_WEBHOOK_VERIFY_TOKEN` matches the token you pass when creating the subscription.
 
 ## Event handling
 
