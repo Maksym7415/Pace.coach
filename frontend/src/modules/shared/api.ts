@@ -26,6 +26,7 @@ export async function apiPost<T>(path: string, body: unknown): Promise<ApiEnvelo
 
 export type User = {
   id: number;
+  username: string;
   email: string;
   name: string;
   avatar_url: string | null;

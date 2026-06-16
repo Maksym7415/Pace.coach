@@ -42,7 +42,9 @@ def register(
     if is_rate_limited(_auth_rate_key("register", request), REGISTER_MAX_PER_WINDOW, REGISTER_WINDOW_SEC):
         logger.warning("Register rate limit exceeded for %s", request.client)
         raise error_json(429, "Too many requests. Try again later.")
-    result, err, status = service.register(body.email, body.password, body.name)
+    result, err, status = service.register(
+        body.username, body.email, body.password, body.name, body.role
+    )
     if err:
         raise error_json(status, err)
     return success_json(result, status_code=status)
@@ -57,7 +59,7 @@ def login(
     if is_rate_limited(_auth_rate_key("login", request), LOGIN_MAX_PER_WINDOW, LOGIN_WINDOW_SEC):
         logger.warning("Login rate limit exceeded for %s", request.client)
         raise error_json(429, "Too many requests. Try again later.")
-    result, err, status = service.login(body.email, body.password)
+    result, err, status = service.login(body.identifier, body.password)
     if err:
         raise error_json(status, err)
     return success_json(result)

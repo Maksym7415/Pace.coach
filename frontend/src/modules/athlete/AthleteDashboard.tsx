@@ -23,7 +23,7 @@ export function AthleteDashboard() {
         {error && <p className="error">{error}</p>}
         {user && (
           <p>
-            Signed in as <strong>{user.name}</strong> ({user.email})
+            Signed in as <strong>{user.name}</strong> (@{user.username})
           </p>
         )}
       </div>

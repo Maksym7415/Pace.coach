@@ -8,7 +8,10 @@ from src.modules.gear_track.models import (  # noqa: F401
     GearService,
     GearServiceLog,
 )
-from src.modules.identity.models import User  # noqa: F401
+from src.modules.coaching.models import CoachAthleteRelation  # noqa: F401
+from src.modules.identity.models import User, UserRole  # noqa: F401
+from src.modules.recovery.models import RecoveryEntry  # noqa: F401
+from src.modules.training.models import Workout  # noqa: F401
 from src.modules.third_party.strava.models import UserStrava  # noqa: F401
 
 __all__ = ["Base"]

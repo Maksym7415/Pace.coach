@@ -1,0 +1,45 @@
+---
+description: 
+alwaysApply: true
+---
+
+## Rule
+
+Do not use database-native ENUM types (MySQL ENUM, PostgreSQL ENUM, etc.) for business-domain values.
+
+Instead:
+
+- Define enums in application code.
+- Store values in the database as VARCHAR/TEXT.
+- Validate values through the application layer.
+- Optionally enforce allowed values using database CHECK constraints when supported.
+
+## Why
+
+Database ENUMs create operational and migration risks:
+
+- MySQL ENUM modifications may require table rebuilds and can cause locks.
+- PostgreSQL ENUMs are easier to evolve but still complicate schema migrations.
+- Adding, removing, or renaming values becomes more difficult.
+- Rollbacks are more complex.
+- ENUM implementations differ between databases.
+
+Using application enums and string columns provides:
+
+- Safer deployments
+- Easier schema evolution
+- Simpler rollbacks
+- Better database portability
+- Consistent behavior across environments
+
+## Preferred Pattern
+
+### Application Layer
+
+```python
+from enum import Enum
+
+class OrderStatusEnum(str, Enum):
+    PENDING = "pending"
+    PROCESSING = "processing"
+    COMPLETED = "completed"
