@@ -1,31 +1,41 @@
-import { useEffect, useState } from "react";
-import { apiGet, User } from "../shared/api";
+import { useState } from "react";
+import { TodaySummary } from "./TodaySummary";
+import { CalendarTab } from "./tabs/CalendarTab";
+import { ActivitiesTab } from "./tabs/ActivitiesTab";
+import { SettingsTab } from "./tabs/SettingsTab";
+
+type DashboardTab = "calendar" | "activities" | "settings";
+
+const TABS: { id: DashboardTab; label: string }[] = [
+  { id: "calendar", label: "Calendar" },
+  { id: "activities", label: "Activities" },
+  { id: "settings", label: "Settings" },
+];
 
 export function AthleteDashboard() {
-  const [user, setUser] = useState<User | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    apiGet<{ user: User }>("/api/auth/me").then((result) => {
-      if (!result.success || !result.user) {
-        setError(result.error ?? "Failed to load profile");
-        return;
-      }
-      setUser(result.user);
-    });
-  }, []);
+  const [activeTab, setActiveTab] = useState<DashboardTab>("calendar");
 
   return (
-    <div className="stack">
-      <h1>Athlete dashboard</h1>
-      <div className="card stack">
-        <p className="muted">MVP placeholder — today workout, readiness, calendar, recovery, AI chat.</p>
-        {error && <p className="error">{error}</p>}
-        {user && (
-          <p>
-            Signed in as <strong>{user.name}</strong> (@{user.username})
-          </p>
-        )}
+    <div className="stack athlete-dashboard">
+      <TodaySummary />
+
+      <div className="tab-bar">
+        {TABS.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            className={activeTab === tab.id ? "tab active" : "tab"}
+            onClick={() => setActiveTab(tab.id)}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="tab-panel">
+        {activeTab === "calendar" && <CalendarTab />}
+        {activeTab === "activities" && <ActivitiesTab />}
+        {activeTab === "settings" && <SettingsTab />}
       </div>
     </div>
   );

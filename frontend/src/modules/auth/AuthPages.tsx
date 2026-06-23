@@ -1,9 +1,12 @@
 import { FormEvent, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { apiPost, setToken } from "../shared/api";
+import { apiPost, setToken, type User } from "../shared/api";
+import { useAuth } from "./AuthContext";
+import { defaultHomePath } from "./roles";
 
 export function LoginPage() {
   const navigate = useNavigate();
+  const { setUser } = useAuth();
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -11,13 +14,14 @@ export function LoginPage() {
   async function onSubmit(event: FormEvent) {
     event.preventDefault();
     setError(null);
-    const result = await apiPost<{ token: string }>("/api/auth/login", { identifier, password });
-    if (!result.success || !result.token) {
+    const result = await apiPost<{ token: string; user: User }>("/api/auth/login", { identifier, password });
+    if (!result.success || !result.token || !result.user) {
       setError(result.error ?? "Login failed");
       return;
     }
     setToken(result.token);
-    navigate("/athlete");
+    setUser(result.user);
+    navigate(defaultHomePath(result.user.roles));
   }
 
   return (
@@ -50,6 +54,7 @@ export function LoginPage() {
 
 export function RegisterPage() {
   const navigate = useNavigate();
+  const { setUser } = useAuth();
   const [username, setUsername] = useState("");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -59,18 +64,19 @@ export function RegisterPage() {
   async function onSubmit(event: FormEvent) {
     event.preventDefault();
     setError(null);
-    const result = await apiPost<{ token: string }>("/api/auth/register", {
+    const result = await apiPost<{ token: string; user: User }>("/api/auth/register", {
       username,
       name,
       email,
       password,
     });
-    if (!result.success || !result.token) {
+    if (!result.success || !result.token || !result.user) {
       setError(result.error ?? "Registration failed");
       return;
     }
     setToken(result.token);
-    navigate("/athlete");
+    setUser(result.user);
+    navigate(defaultHomePath(result.user.roles));
   }
 
   return (

@@ -50,7 +50,7 @@ a {
 .app-main {
   flex: 1;
   padding: 1.5rem;
-  max-width: 960px;
+  max-width: 1100px;
   width: 100%;
   margin: 0 auto;
 }
@@ -93,4 +93,329 @@ input {
 
 .muted {
   color: #64748b;
+}
+
+.success {
+  color: #16a34a;
+}
+
+.row-between {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.badge {
+  display: inline-block;
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.badge-muted {
+  background: #e2e8f0;
+  color: #475569;
+}
+
+.badge-ok {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.badge-mid {
+  background: #fef9c3;
+  color: #854d0e;
+}
+
+.badge-low {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.today-grid {
+  display: grid;
+  gap: 1rem;
+}
+
+@media (min-width: 768px) {
+  .today-grid {
+    grid-template-columns: 1fr 1.2fr;
+  }
+}
+
+.tab-bar {
+  display: flex;
+  gap: 0.5rem;
+  border-bottom: 1px solid #e2e8f0;
+  padding-bottom: 0.5rem;
+}
+
+.tab {
+  background: transparent;
+  color: #475569;
+  border: 1px solid transparent;
+  border-radius: 8px 8px 0 0;
+  padding: 0.5rem 1rem;
+}
+
+.tab.active {
+  background: white;
+  color: #0f172a;
+  border-color: #e2e8f0;
+  border-bottom-color: white;
+  font-weight: 600;
+}
+
+.tab-panel {
+  padding-top: 0.5rem;
+}
+
+.field-group {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  margin: 0;
+}
+
+.field-group legend {
+  padding: 0 0.25rem;
+  font-weight: 600;
+}
+
+.form-grid {
+  display: grid;
+  gap: 0.75rem;
+}
+
+@media (min-width: 640px) {
+  .form-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.recovery-form label {
+  display: grid;
+  gap: 0.35rem;
+  font-size: 0.9rem;
+}
+
+.range-value {
+  font-size: 0.85rem;
+  color: #64748b;
+}
+
+.calendar-nav {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.calendar-weekdays,
+.calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 0.35rem;
+}
+
+.calendar-weekdays span {
+  text-align: center;
+  font-size: 0.8rem;
+  color: #64748b;
+  font-weight: 600;
+}
+
+.calendar-cell {
+  min-height: 6.5rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: white;
+  padding: 0.35rem;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.25rem;
+  cursor: pointer;
+  text-align: left;
+}
+
+.calendar-cell.empty {
+  border: none;
+  background: transparent;
+  cursor: default;
+}
+
+.calendar-cell.has-workout {
+  border-color: #93c5fd;
+}
+
+.calendar-cell.selected {
+  outline: 2px solid #2563eb;
+}
+
+.calendar-day {
+  font-size: 0.85rem;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.calendar-events {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  width: 100%;
+  min-width: 0;
+  flex: 1;
+}
+
+.calendar-event-chip {
+  display: block;
+  width: 100%;
+  padding: 0.12rem 0.35rem;
+  border-radius: 4px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: white;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.35;
+}
+
+.calendar-event-chip.chip-workout.status-scheduled {
+  background: #2563eb;
+}
+
+.calendar-event-chip.chip-workout.status-completed {
+  background: #16a34a;
+}
+
+.calendar-event-chip.chip-workout.status-skipped {
+  background: #94a3b8;
+}
+
+.calendar-event-chip.chip-activity {
+  background: #ea580c;
+}
+
+.calendar-event-more {
+  font-size: 0.65rem;
+  color: #64748b;
+  padding: 0 0.15rem;
+}
+
+.calendar-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  font-size: 0.85rem;
+}
+
+.calendar-legend .legend-chip {
+  display: inline-block;
+  width: auto;
+  font-size: 0.75rem;
+  padding: 0.15rem 0.5rem;
+}
+
+.activity-card {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 0.75rem;
+  border-left: 3px solid #ea580c;
+}
+
+.linked-activity {
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px dashed #e2e8f0;
+  font-size: 0.9rem;
+}
+
+.workout-card {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 0.75rem;
+}
+
+.workout-card-compact {
+  cursor: pointer;
+}
+
+.workout-card-compact:hover {
+  border-color: #93c5fd;
+}
+
+.workout-steps {
+  margin: 0.5rem 0 0;
+  padding-left: 1.25rem;
+  font-size: 0.9rem;
+}
+
+.status-badge {
+  font-size: 0.75rem;
+  text-transform: capitalize;
+  padding: 0.15rem 0.45rem;
+  border-radius: 999px;
+  background: #e2e8f0;
+}
+
+.status-badge.status-completed {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.status-badge.status-skipped {
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  z-index: 100;
+}
+
+.modal {
+  width: min(100%, 520px);
+  max-height: 90vh;
+  overflow: auto;
+}
+
+.activity-row-header {
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  color: inherit;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+.detail-list {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0;
+}
+
+.detail-list div {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.detail-list dt {
+  font-weight: 600;
+  min-width: 6rem;
+}
+
+.detail-list dd {
+  margin: 0;
+  color: #475569;
 }

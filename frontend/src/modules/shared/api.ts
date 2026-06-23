@@ -1,4 +1,4 @@
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
+export const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 
 export type ApiEnvelope<T> = {
   success: boolean;
@@ -24,6 +24,24 @@ export async function apiPost<T>(path: string, body: unknown): Promise<ApiEnvelo
   return response.json();
 }
 
+export async function apiPut<T>(path: string, body?: unknown): Promise<ApiEnvelope<T>> {
+  const response = await fetch(`${API_BASE}${path}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+  return response.json();
+}
+
+export async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
+  return fetch(`${API_BASE}${path}`, {
+    ...init,
+    headers: { ...authHeaders(), ...init?.headers },
+  });
+}
+
+export type UserRole = "athlete" | "coach";
+
 export type User = {
   id: number;
   username: string;
@@ -31,6 +49,7 @@ export type User = {
   name: string;
   avatar_url: string | null;
   preferred_distance_unit: string;
+  roles: UserRole[];
   strava_connected?: boolean;
 };
 
