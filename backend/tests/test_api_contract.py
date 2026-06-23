@@ -120,3 +120,42 @@ def test_strava_status_requires_auth():
 def test_gear_list_requires_auth():
     response = client.get("/api/gear")
     assert response.status_code == 401
+
+
+def test_activities_list_requires_auth():
+    response = client.get("/api/activities")
+    assert response.status_code == 401
+
+
+def test_activities_list_invalid_date_range():
+    client.post(
+        "/api/auth/register",
+        json={
+            "username": "actlist1",
+            "email": "actlist1@example.com",
+            "password": "password1234",
+            "name": "Act",
+        },
+    )
+    login = client.post(
+        "/api/auth/login",
+        json={"identifier": "actlist1", "password": "password1234"},
+    )
+    token = login.json()["token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    response = client.get(
+        "/api/activities?start_date=2026-06-30&end_date=2026-06-01",
+        headers=headers,
+    )
+    assert response.status_code == 400
+    assert response.json()["success"] is False
+    assert "start_date" in response.json()["error"]
+
+    response = client.get(
+        "/api/activities?start_date=2024-01-01&end_date=2026-01-01",
+        headers=headers,
+    )
+    assert response.status_code == 400
+    assert response.json()["success"] is False
+    assert "365" in response.json()["error"]

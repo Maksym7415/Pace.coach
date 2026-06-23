@@ -1,4 +1,5 @@
 """Gear and activities API routes."""
+from datetime import date
 from typing import Any
 
 from fastapi import APIRouter, Body, Depends, Query
@@ -82,8 +83,16 @@ def set_default_shoe(
 
 
 @router.get("/api/activities")
-def list_activities(user: CurrentUser, service: GearTrackService = Depends(get_gear_track_service)):
-    return success_json(service.list_activities(user.id))
+def list_activities(
+    user: CurrentUser,
+    start_date: date | None = Query(None),
+    end_date: date | None = Query(None),
+    service: GearTrackService = Depends(get_gear_track_service),
+):
+    result, err, status = service.list_activities(user.id, start_date, end_date)
+    if err:
+        raise error_json(status, err)
+    return success_json(result)
 
 
 @router.post("/api/activities")

@@ -53,6 +53,9 @@ class Workout(Base):
     )
     completed_at: Mapped[datetime | None] = mapped_column(nullable=True)
     notes: Mapped[str | None] = mapped_column(Text(), nullable=True)
+    activity_id: Mapped[int | None] = mapped_column(
+        ForeignKey("activities.id", ondelete="SET NULL"), nullable=True, index=True
+    )
 
     created_at: Mapped[datetime | None] = mapped_column(default=datetime.utcnow)
     updated_at: Mapped[datetime | None] = mapped_column(
@@ -61,3 +64,4 @@ class Workout(Base):
 
     athlete = relationship("User", foreign_keys=[athlete_id])
     created_by = relationship("User", foreign_keys=[created_by_id])
+    activity = relationship("Activity", foreign_keys=[activity_id])

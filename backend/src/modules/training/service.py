@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from src.modules.coaching.models import CoachAthleteRelation, RelationStatus
+from src.modules.gear_track.models import Activity
 from src.modules.identity.models import User, UserRole, UserRoleEnum
 from src.modules.training.models import Workout, WorkoutStatus
 from src.modules.training.schemas import WorkoutCreateRequest
@@ -19,7 +20,24 @@ class TrainingService:
     def __init__(self, db: Session):
         self.db = db
 
+    def _activity_summary(self, activity: Activity) -> dict:
+        return {
+            "id": activity.id,
+            "name": activity.name,
+            "date": activity.date.isoformat() if hasattr(activity.date, "isoformat") else str(activity.date),
+            "total_distance_km": activity.total_distance_km,
+            "total_hours": activity.total_hours,
+            "activity_type": activity.activity_type,
+            "source": activity.source,
+        }
+
     def _workout_to_dict(self, workout: Workout) -> dict:
+        linked_activity = None
+        if workout.activity_id:
+            activity = self.db.get(Activity, workout.activity_id)
+            if activity:
+                linked_activity = self._activity_summary(activity)
+
         return {
             "id": workout.id,
             "athlete_id": workout.athlete_id,
@@ -34,6 +52,8 @@ class TrainingService:
             "status": workout.status.value,
             "completed_at": workout.completed_at.isoformat() if workout.completed_at else None,
             "notes": workout.notes,
+            "activity_id": workout.activity_id,
+            "linked_activity": linked_activity,
             "created_at": workout.created_at.isoformat() if workout.created_at else None,
             "updated_at": workout.updated_at.isoformat() if workout.updated_at else None,
         }

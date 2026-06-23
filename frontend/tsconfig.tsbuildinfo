@@ -1,1 +1,0 @@
-{"root":["./src/main.tsx","./src/vite-env.d.ts","./src/app/app.tsx","./src/modules/athlete/athletedashboard.tsx","./src/modules/auth/authpages.tsx","./src/modules/coach/coachdashboard.tsx","./src/modules/shared/api.ts"],"version":"5.9.3"}

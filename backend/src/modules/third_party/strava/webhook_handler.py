@@ -6,7 +6,7 @@ import queue
 import threading
 import time
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any
 
 import requests
@@ -16,6 +16,7 @@ from src.core.database import SessionLocal
 from src.modules.gear_track.models import Activity, ActivityGearUsage, Gear
 from src.modules.gear_track.service import _gear_usage_value
 from src.modules.third_party.strava.models import UserStrava
+from src.modules.training.activity_link import try_link_activity_to_workout
 
 STRAVA_API_BASE = "https://www.strava.com/api/v3"
 
@@ -66,6 +67,39 @@ def _map_strava_sport_to_activity_type(sport_type: str) -> str:
 def _is_supported_sport(sport_type: str) -> bool:
     """Check if we import this sport (run, bike, swim)."""
     return _map_strava_sport_to_activity_type(sport_type) in ("run", "bike", "swim")
+
+
+def _parse_strava_local_start(iso: str) -> date:
+    """Calendar day from Strava start_date_local (athlete wall-clock time)."""
+    cleaned = iso.strip().removesuffix("Z")
+    return datetime.fromisoformat(cleaned).date()
+
+
+def _parse_strava_utc_start(iso: str) -> date:
+    """Calendar day from Strava start_date (UTC)."""
+    return datetime.fromisoformat(iso.replace("Z", "+00:00")).date()
+
+
+def activity_date_from_strava_payload(data: dict) -> date:
+    """
+    Derive the activity calendar date aligned with the athlete's local day.
+    Prefers start_date_local; falls back to UTC start_date, then today (UTC).
+    """
+    local = data.get("start_date_local")
+    if local:
+        try:
+            return _parse_strava_local_start(local)
+        except (ValueError, TypeError):
+            logger.warning("Invalid start_date_local from Strava; falling back to start_date")
+
+    utc_start = data.get("start_date")
+    if utc_start:
+        try:
+            return _parse_strava_utc_start(utc_start)
+        except (ValueError, TypeError):
+            logger.warning("Invalid start_date from Strava; defaulting to current date")
+
+    return datetime.now(timezone.utc).date()
 
 
 _task_queue: "queue.Queue[tuple[Callable[..., Any], tuple[Any, ...], dict[str, Any]]]" = queue.Queue()
@@ -147,16 +181,7 @@ def process_activity_create(owner_id: int, object_id: int) -> None:
             moving_time_sec = data.get("moving_time") or 0
             moving_hours = round(moving_time_sec / 3600.0, 2) if moving_time_sec else None
             name = data.get("name") or "Strava Activity"
-            start = data.get("start_date") or data.get("start_date_local")
-            if start:
-                try:
-                    dt = datetime.fromisoformat(start.replace("Z", "+00:00"))
-                    date = dt.date()
-                except (ValueError, TypeError):
-                    logger.warning("Invalid start_date from Strava; defaulting to current date")
-                    date = datetime.now(timezone.utc).date()
-            else:
-                date = datetime.now(timezone.utc).date()
+            date = activity_date_from_strava_payload(data)
 
             activity = Activity(
                 user_id=us.user_id,
@@ -200,6 +225,10 @@ def process_activity_create(owner_id: int, object_id: int) -> None:
                         gear_id=default_gear.id
                     ).scalar()
                     default_gear.value_covered = round(float(total), 2)
+
+            try_link_activity_to_workout(
+                db, us.user_id, activity.id, date, activity_type
+            )
 
             db.commit()
             logger.info("Created Strava activity user_id=%s activity_id=%s", us.user_id, activity.id)

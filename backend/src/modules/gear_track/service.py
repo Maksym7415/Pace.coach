@@ -1,7 +1,7 @@
 """Gear track business logic: gear, activities, shoes, alerts, and maintenance."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
@@ -14,6 +14,7 @@ from src.modules.gear_track.models import (
     GearService,
     GearServiceLog,
 )
+from src.modules.training.activity_link import try_link_activity_to_workout
 
 
 def _round_km(value, default=0.0):
@@ -305,13 +306,25 @@ class GearTrackService:
 
     # --- Activities ---
 
-    def list_activities(self, user_id: int) -> dict:
-        activities = self.db.scalars(
-            select(Activity)
-            .where(Activity.user_id == user_id)
-            .order_by(Activity.date.desc())
-        ).all()
-        return {"success": True, "activities": [_activity_to_json(a) for a in activities]}
+    def list_activities(
+        self,
+        user_id: int,
+        start_date: date | None = None,
+        end_date: date | None = None,
+    ) -> tuple[dict | None, str | None, int]:
+        if start_date is not None and end_date is not None:
+            if start_date > end_date:
+                return None, "start_date must be before or equal to end_date", 400
+            if (end_date - start_date).days > 365:
+                return None, "Date range cannot exceed 365 days", 400
+
+        stmt = select(Activity).where(Activity.user_id == user_id)
+        if start_date is not None:
+            stmt = stmt.where(Activity.date >= start_date)
+        if end_date is not None:
+            stmt = stmt.where(Activity.date <= end_date)
+        activities = self.db.scalars(stmt.order_by(Activity.date.desc())).all()
+        return {"success": True, "activities": [_activity_to_json(a) for a in activities]}, None, 200
 
     def create_activity(self, user_id: int, data: dict) -> tuple[dict | None, str | None, int]:
         data = data or {}
@@ -381,6 +394,10 @@ class GearTrackService:
                     )
                     self.db.flush()
                     _recompute_gear_value_covered(self.db, default_gear.id)
+
+        try_link_activity_to_workout(
+            self.db, user_id, activity.id, date, activity_type
+        )
 
         self.db.commit()
         self.db.refresh(activity)

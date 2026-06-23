@@ -1,6 +1,7 @@
 """Strava integration API routes."""
 import logging
 from typing import Any
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 import requests
 from fastapi import APIRouter, Depends, Header, Query, Request
@@ -28,6 +29,23 @@ def _get_redirect_uri(state: str | None, request_redirect_uri: str | None = None
         redirect_uri = state.split("|", 1)[1]
     redirect_uri = redirect_uri or request_redirect_uri or STRAVA_FRONTEND_REDIRECT_URL
     return redirect_uri
+
+
+def _frontend_redirect_url(
+    state: str | None,
+    request_redirect_uri: str | None = None,
+    *,
+    outcome: str,
+    reason: str | None = None,
+) -> str:
+    """Build frontend redirect URL with Strava OAuth outcome query params."""
+    base = _get_redirect_uri(state, request_redirect_uri)
+    parsed = urlparse(base)
+    query = dict(parse_qsl(parsed.query, keep_blank_values=True))
+    query["strava"] = outcome
+    if reason:
+        query["reason"] = reason
+    return urlunparse(parsed._replace(query=urlencode(query)))
 
 
 @router.get("/api/strava/connect")
@@ -63,28 +81,34 @@ def strava_callback_get(
     code: str | None = Query(None),
     state: str | None = Query(None),
     redirect_uri: str | None = Query(None),
+    error: str | None = Query(None),
     svc: StravaService = Depends(get_strava_service),
 ):
     """OAuth callback via Strava redirect (GET)."""
-    if not svc.oauth.is_configured():
-        return RedirectResponse(url=_get_redirect_uri(state, redirect_uri), status_code=302)
 
-    if not code:
-        return RedirectResponse(url=_get_redirect_uri(state, redirect_uri), status_code=302)
+    def redirect(outcome: str, reason: str | None = None) -> RedirectResponse:
+        url = _frontend_redirect_url(state, redirect_uri, outcome=outcome, reason=reason)
+        return RedirectResponse(url=url, status_code=302)
+
+    if not svc.oauth.is_configured():
+        return redirect("error", "exchange_failed")
+
+    if error or not code:
+        return redirect("error", "denied")
 
     try:
         us = svc.exchange_code(code, state)
     except requests.RequestException as exc:
         logger.warning("Strava token exchange failed: %s", exc)
-        return RedirectResponse(url=_get_redirect_uri(state, redirect_uri), status_code=302)
+        return redirect("error", "exchange_failed")
     except Exception:
         logger.exception("Strava callback error")
-        return RedirectResponse(url=_get_redirect_uri(state, redirect_uri), status_code=302)
+        return redirect("error", "exchange_failed")
 
     if not us:
-        return RedirectResponse(url=_get_redirect_uri(state, redirect_uri), status_code=302)
+        return redirect("error", "invalid_state")
 
-    return RedirectResponse(url=_get_redirect_uri(state, redirect_uri), status_code=302)
+    return redirect("connected")
 
 
 @router.post("/api/strava/callback")

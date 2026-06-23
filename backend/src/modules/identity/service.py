@@ -45,6 +45,14 @@ class IdentityService:
     def __init__(self, db: Session):
         self.db = db
 
+    def _strava_connected(self, user_id: int) -> bool:
+        return self.db.scalar(
+            select(UserStrava).where(UserStrava.user_id == user_id)
+        ) is not None
+
+    def _user_payload(self, user: User) -> dict:
+        return user_to_json(user, strava_connected=self._strava_connected(user.id))
+
     def register(
         self,
         username: str,
@@ -82,7 +90,7 @@ class IdentityService:
         self.db.commit()
         self.db.refresh(user)
         token = create_token(user.id)
-        return {"token": token, "user": user_to_json(user)}, None, 201
+        return {"token": token, "user": self._user_payload(user)}, None, 201
 
     def login(self, identifier: str, password: str) -> tuple[dict | None, str | None, int]:
         identifier = identifier.strip()
@@ -97,7 +105,7 @@ class IdentityService:
             return None, "Invalid credentials", 401
         logger.info("Successful login user_id=%s", user.id)
         token = create_token(user.id)
-        return {"token": token, "user": user_to_json(user)}, None, 200
+        return {"token": token, "user": self._user_payload(user)}, None, 200
 
     def forgot_password(self, email: str) -> tuple[dict, str | None, int]:
         email = email.strip().lower()
@@ -129,10 +137,7 @@ class IdentityService:
         return {"message": "Password reset successfully"}, None, 200
 
     def get_me(self, user: User) -> dict:
-        strava_connected = self.db.scalar(
-            select(UserStrava).where(UserStrava.user_id == user.id)
-        ) is not None
-        return {"user": user_to_json(user, strava_connected=strava_connected)}
+        return {"user": self._user_payload(user)}
 
     def update_profile(self, user: User, data: dict) -> dict:
         if "name" in data and data["name"] is not None:
@@ -154,4 +159,4 @@ class IdentityService:
                 user.preferred_distance_unit = unit
         self.db.commit()
         self.db.refresh(user)
-        return {"user": user_to_json(user)}
+        return {"user": self._user_payload(user)}
