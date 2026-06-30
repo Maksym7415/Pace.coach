@@ -68,6 +68,18 @@ def my_athletes(
     return success_json(service.list_my_athletes(coach))
 
 
+@router.get("/athletes/{athlete_id}")
+def get_athlete(
+    athlete_id: int,
+    coach: Annotated[User, Depends(require_role(UserRoleEnum.coach))],
+    service: CoachingService = Depends(get_coaching_service),
+):
+    result, err, status = service.get_athlete_detail(coach, athlete_id)
+    if err:
+        raise error_json(status, err)
+    return success_json(result)
+
+
 @router.get("/coaches")
 def my_coaches(
     athlete: Annotated[User, Depends(require_role(UserRoleEnum.athlete))],

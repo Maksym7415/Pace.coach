@@ -14,14 +14,19 @@ export function formatDuration(hours: number | null | undefined): string {
 type ActivityLike = {
   total_distance_km: number | null;
   total_hours: number | null;
-  activity_type: string | null;
+  sport_code: string | null;
+  activity_type_code: string | null;
 };
+
+function activityTypeLabel(activity: ActivityLike): string {
+  return activity.activity_type_code ?? activity.sport_code ?? "unknown";
+}
 
 export function formatActivityMeta(activity: ActivityLike): string {
   return [
     formatDistance(activity.total_distance_km),
     formatDuration(activity.total_hours),
-    activity.activity_type ?? "other",
+    activityTypeLabel(activity),
   ].join(" · ");
 }
 
@@ -30,6 +35,6 @@ export function formatActivityListRow(activity: Activity): string {
     formatDate(activity.date),
     formatDistance(activity.total_distance_km),
     formatDuration(activity.total_hours),
-    activity.activity_type ?? "other",
+    activityTypeLabel(activity),
   ].join(" · ");
 }

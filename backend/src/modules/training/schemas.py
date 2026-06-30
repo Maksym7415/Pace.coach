@@ -1,20 +1,39 @@
 """Pydantic request schemas for training endpoints."""
-from datetime import date
+from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from datetime import date
+from typing import Any
+
+from pydantic import BaseModel, Field, field_validator
 
 from src.modules.training.models import WorkoutType
+from src.modules.training.workout_steps import RepeatBlockModel, WorkoutStepModel, parse_step_item
 
 
-class WorkoutCreateRequest(BaseModel):
-    athlete_id: int
+class WorkoutWriteRequest(BaseModel):
+    """Shared fields for create and update."""
+
     scheduled_date: date
-    workout_type: WorkoutType
+    sport_id: int = Field(..., ge=1)
+    workout_type: WorkoutType = WorkoutType.easy
     title: str = Field(..., min_length=1, max_length=255)
     description: str | None = None
-    steps: dict | None = None
-    duration_min: int | None = Field(None, ge=1)
-    distance_m: int | None = Field(None, ge=1)
+    steps: list[WorkoutStepModel | RepeatBlockModel] = Field(..., min_length=1)
+
+    @field_validator("steps", mode="before")
+    @classmethod
+    def parse_steps(cls, value: Any) -> list[Any]:
+        if not isinstance(value, list):
+            raise ValueError("steps must be a list")
+        return [parse_step_item(item) if isinstance(item, dict) else item for item in value]
+
+
+class WorkoutCreateRequest(WorkoutWriteRequest):
+    athlete_id: int
+
+
+class WorkoutUpdateRequest(WorkoutWriteRequest):
+    pass
 
 
 class WorkoutCompleteRequest(BaseModel):

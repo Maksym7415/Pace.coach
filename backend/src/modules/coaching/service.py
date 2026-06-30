@@ -2,14 +2,34 @@
 from __future__ import annotations
 
 import logging
+from datetime import date, timedelta
 
-from sqlalchemy import or_, select
-from sqlalchemy.orm import Session
+from sqlalchemy import func, or_, select
+from sqlalchemy.orm import Session, joinedload
 
 from src.modules.coaching.models import CoachAthleteRelation, RelationStatus
+from src.modules.coaching.relations import (
+    COACH_ATHLETE_NOT_LINKED_ERROR,
+    COACH_ATHLETE_NOT_LINKED_STATUS,
+    get_active_coach_athlete_relation,
+)
 from src.modules.identity.models import User, UserRole, UserRoleEnum
+from src.modules.training.models import Workout, WorkoutStatus
 
 logger = logging.getLogger("coach_app.coaching")
+
+
+def _user_summary(user: User) -> dict:
+    return {
+        "id": user.id,
+        "name": user.name,
+        "username": user.username,
+        "email": user.email,
+    }
+
+
+def _athlete_summary(user: User) -> dict:
+    return _user_summary(user)
 
 
 class CoachingService:
@@ -100,13 +120,66 @@ class CoachingService:
         return {"relation": self._rel_to_dict(rel)}, None, 200
 
     def list_my_athletes(self, coach: User) -> dict:
-        rels = self.db.scalars(
-            select(CoachAthleteRelation).where(
-                CoachAthleteRelation.coach_id == coach.id,
-                CoachAthleteRelation.status == RelationStatus.active,
+        rels = (
+            self.db.scalars(
+                select(CoachAthleteRelation)
+                .where(
+                    CoachAthleteRelation.coach_id == coach.id,
+                    CoachAthleteRelation.status == RelationStatus.active,
+                )
+                .options(joinedload(CoachAthleteRelation.athlete))
             )
-        ).all()
-        return {"relations": [self._rel_to_dict(r) for r in rels]}
+            .unique()
+            .all()
+        )
+        athletes = []
+        for rel in rels:
+            athlete = rel.athlete
+            if not athlete:
+                continue
+            athletes.append(
+                {
+                    "relation_id": rel.id,
+                    "athlete": _athlete_summary(athlete),
+                    "status": rel.status.value,
+                    "created_at": rel.created_at.isoformat() if rel.created_at else None,
+                }
+            )
+        return {"athletes": athletes, "count": len(athletes)}
+
+    def get_athlete_detail(
+        self, coach: User, athlete_id: int
+    ) -> tuple[dict | None, str | None, int]:
+        rel = get_active_coach_athlete_relation(self.db, coach.id, athlete_id)
+        if not rel:
+            return None, COACH_ATHLETE_NOT_LINKED_ERROR, COACH_ATHLETE_NOT_LINKED_STATUS
+        athlete = self.db.get(User, athlete_id)
+        if not athlete:
+            return None, "Athlete not found", 404
+
+        today = date.today()
+        upcoming_end = today + timedelta(days=7)
+        upcoming_count = self.db.scalar(
+            select(func.count())
+            .select_from(Workout)
+            .where(
+                Workout.athlete_id == athlete_id,
+                Workout.scheduled_date >= today,
+                Workout.scheduled_date <= upcoming_end,
+                Workout.status == WorkoutStatus.scheduled,
+            )
+        )
+
+        return (
+            {
+                "relation_id": rel.id,
+                "coaching_since": rel.created_at.isoformat() if rel.created_at else None,
+                "athlete": _athlete_summary(athlete),
+                "upcoming_workouts_count": int(upcoming_count or 0),
+            },
+            None,
+            200,
+        )
 
     def list_my_coaches(self, athlete: User) -> dict:
         rels = self.db.scalars(
@@ -118,13 +191,32 @@ class CoachingService:
         return {"relations": [self._rel_to_dict(r) for r in rels]}
 
     def list_pending_invitations(self, user: User) -> dict:
-        rels = self.db.scalars(
-            select(CoachAthleteRelation).where(
-                CoachAthleteRelation.athlete_id == user.id,
-                CoachAthleteRelation.status == RelationStatus.pending,
+        rels = (
+            self.db.scalars(
+                select(CoachAthleteRelation)
+                .where(
+                    CoachAthleteRelation.athlete_id == user.id,
+                    CoachAthleteRelation.status == RelationStatus.pending,
+                )
+                .options(joinedload(CoachAthleteRelation.coach))
             )
-        ).all()
-        return {"relations": [self._rel_to_dict(r) for r in rels]}
+            .unique()
+            .all()
+        )
+        invitations = []
+        for rel in rels:
+            coach = rel.coach
+            if not coach:
+                continue
+            invitations.append(
+                {
+                    "relation_id": rel.id,
+                    "coach": _user_summary(coach),
+                    "status": rel.status.value,
+                    "created_at": rel.created_at.isoformat() if rel.created_at else None,
+                }
+            )
+        return {"invitations": invitations, "count": len(invitations)}
 
     def search_users(
         self,

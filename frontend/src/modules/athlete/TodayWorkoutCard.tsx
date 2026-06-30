@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { getCalendar, type Workout } from "../training/api";
+import { WorkoutDetailModal } from "../workout/WorkoutDetailModal";
 import { todayIso } from "../shared/dates";
 import { WorkoutCard } from "./calendar/WorkoutCard";
 
@@ -43,17 +44,7 @@ export function TodayWorkoutCard() {
         ))
       )}
       {selected && (
-        <div className="modal-backdrop" onClick={() => setSelected(null)}>
-          <div className="modal card stack" onClick={(e) => e.stopPropagation()}>
-            <div className="row-between">
-              <h3>Workout detail</h3>
-              <button type="button" className="secondary" onClick={() => setSelected(null)}>
-                Close
-              </button>
-            </div>
-            <WorkoutCard workout={selected} />
-          </div>
-        </div>
+        <WorkoutDetailModal workout={selected} onClose={() => setSelected(null)} />
       )}
     </div>
   );

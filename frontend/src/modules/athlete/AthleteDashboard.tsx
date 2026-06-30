@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { PendingInvitationsBanner } from "./PendingInvitationsBanner";
 import { TodaySummary } from "./TodaySummary";
 import { CalendarTab } from "./tabs/CalendarTab";
 import { ActivitiesTab } from "./tabs/ActivitiesTab";
@@ -17,6 +18,7 @@ export function AthleteDashboard() {
 
   return (
     <div className="stack athlete-dashboard">
+      <PendingInvitationsBanner />
       <TodaySummary />
 
       <div className="tab-bar">

@@ -33,6 +33,14 @@ export async function apiPut<T>(path: string, body?: unknown): Promise<ApiEnvelo
   return response.json();
 }
 
+export async function apiDelete<T>(path: string): Promise<ApiEnvelope<T>> {
+  const response = await fetch(`${API_BASE}${path}`, {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
+  return response.json();
+}
+
 export async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
   return fetch(`${API_BASE}${path}`, {
     ...init,

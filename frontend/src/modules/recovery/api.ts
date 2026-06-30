@@ -49,3 +49,9 @@ export async function listEntries(startDate: string, endDate: string) {
   const params = new URLSearchParams({ start_date: startDate, end_date: endDate });
   return apiGet<{ entries: RecoveryEntry[]; count: number }>(`/api/recovery/entries?${params}`);
 }
+
+export async function getAthleteTodayEntry(athleteId: number) {
+  return apiGet<{ entry: RecoveryEntry | null }>(
+    `/api/recovery/athletes/${athleteId}/entries/today`,
+  );
+}

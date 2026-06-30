@@ -7,7 +7,10 @@ export type Activity = {
   total_distance_km: number | null;
   total_hours: number | null;
   total_sessions: number | null;
-  activity_type: string | null;
+  sport_id: number | null;
+  sport_code: string | null;
+  activity_type_id: number | null;
+  activity_type_code: string | null;
   source: string;
   strava_activity_id: number | null;
   created_at: string | null;
@@ -15,7 +18,16 @@ export type Activity = {
 
 export type ActivitySummary = Pick<
   Activity,
-  "id" | "name" | "date" | "total_distance_km" | "total_hours" | "activity_type" | "source"
+  | "id"
+  | "name"
+  | "date"
+  | "total_distance_km"
+  | "total_hours"
+  | "sport_id"
+  | "sport_code"
+  | "activity_type_id"
+  | "activity_type_code"
+  | "source"
 >;
 
 export async function listActivities(startDate?: string, endDate?: string) {

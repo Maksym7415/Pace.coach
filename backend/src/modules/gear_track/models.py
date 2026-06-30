@@ -1,10 +1,32 @@
 """Gear, activities, and related domain models."""
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, Date, Float, ForeignKey, Index, String, text
+from sqlalchemy import BigInteger, Boolean, Date, Float, ForeignKey, Index, String, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.core.database import Base
+
+
+class ActivityType(Base):
+    __tablename__ = "activity_types"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    sport_id: Mapped[int] = mapped_column(
+        ForeignKey("sports.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    code: Mapped[str] = mapped_column(String(50), nullable=False)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean(), nullable=False, default=True)
+    created_at: Mapped[datetime | None] = mapped_column(default=datetime.utcnow)
+    updated_at: Mapped[datetime | None] = mapped_column(
+        default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    sport = relationship("Sport")
+
+    __table_args__ = (
+        UniqueConstraint("sport_id", "code", name="uq_activity_types_sport_code"),
+    )
 
 
 class Activity(Base):
@@ -17,12 +39,19 @@ class Activity(Base):
     total_distance_km: Mapped[float] = mapped_column(Float, nullable=False)
     total_hours: Mapped[float | None] = mapped_column(Float, nullable=True)
     total_sessions: Mapped[float | None] = mapped_column(Float, nullable=True)
-    activity_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    sport_id: Mapped[int | None] = mapped_column(
+        ForeignKey("sports.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    activity_type_id: Mapped[int | None] = mapped_column(
+        ForeignKey("activity_types.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     source: Mapped[str] = mapped_column(String(32), nullable=False)
     strava_activity_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
     created_at: Mapped[datetime | None] = mapped_column(default=datetime.utcnow)
 
     user = relationship("User", back_populates="activities")
+    sport = relationship("Sport")
+    activity_type = relationship("ActivityType")
     activity_gear_usages = relationship(
         "ActivityGearUsage", back_populates="activity", cascade="all, delete-orphan"
     )

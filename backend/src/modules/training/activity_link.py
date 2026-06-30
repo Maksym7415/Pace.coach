@@ -22,12 +22,12 @@ RUN_WORKOUT_TYPES = {
 }
 
 
-def select_workout_for_activity(candidates: list[Workout], activity_type: str) -> Workout | None:
+def select_workout_for_activity(candidates: list[Workout], sport_code: str) -> Workout | None:
     """Pick a single workout to link, or None if ambiguous."""
     if not candidates:
         return None
 
-    if activity_type == "run":
+    if sport_code == "running":
         eligible = [w for w in candidates if w.workout_type in RUN_WORKOUT_TYPES]
     else:
         eligible = [w for w in candidates if w.workout_type != WorkoutType.rest]
@@ -42,7 +42,7 @@ def try_link_activity_to_workout(
     athlete_id: int,
     activity_id: int,
     activity_date: date,
-    activity_type: str,
+    sport_code: str,
 ) -> Workout | None:
     """
     Auto-complete a scheduled workout when a matching activity is imported.
@@ -62,7 +62,7 @@ def try_link_activity_to_workout(
     if not candidates:
         return None
 
-    workout = select_workout_for_activity(list(candidates), activity_type)
+    workout = select_workout_for_activity(list(candidates), sport_code)
     if not workout:
         return None
 

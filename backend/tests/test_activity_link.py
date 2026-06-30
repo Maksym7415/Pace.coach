@@ -11,15 +11,15 @@ def _workout(workout_type: WorkoutType):
 
 def test_select_single_run_workout():
     candidates = [_workout(WorkoutType.easy)]
-    assert select_workout_for_activity(candidates, "run") is candidates[0]
+    assert select_workout_for_activity(candidates, "running") is candidates[0]
 
 
 def test_select_ambiguous_when_multiple_run_workouts():
     candidates = [_workout(WorkoutType.easy), _workout(WorkoutType.intervals)]
-    assert select_workout_for_activity(candidates, "run") is None
+    assert select_workout_for_activity(candidates, "running") is None
 
 
 def test_select_none_when_only_rest_day():
     candidates = [_workout(WorkoutType.rest)]
-    assert select_workout_for_activity(candidates, "run") is None
-    assert select_workout_for_activity(candidates, "bike") is None
+    assert select_workout_for_activity(candidates, "running") is None
+    assert select_workout_for_activity(candidates, "cycling") is None

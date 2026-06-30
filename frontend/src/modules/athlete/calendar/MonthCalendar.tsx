@@ -4,6 +4,7 @@ import { getCalendar, type Workout } from "../../training/api";
 import { formatMonthYear, monthBounds, toDateKey, toIsoDate } from "../../shared/dates";
 import { ActivityCard } from "../activities/ActivityCard";
 import { CalendarDayEvents } from "./CalendarDayEvents";
+import { WorkoutDetailModal } from "../../workout/WorkoutDetailModal";
 import { WorkoutCard } from "./WorkoutCard";
 
 function groupByDate<T extends { date?: string; scheduled_date?: string }>(
@@ -54,6 +55,7 @@ export function MonthCalendar() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  const [selectedWorkout, setSelectedWorkout] = useState<Workout | null>(null);
 
   useEffect(() => {
     setLoading(true);
@@ -167,7 +169,14 @@ export function MonthCalendar() {
             >
               <span className="calendar-day">{dayNum}</span>
               {hasEvents && (
-                <CalendarDayEvents workouts={dayWorkouts} activities={dayActivities} />
+                <CalendarDayEvents
+                  workouts={dayWorkouts}
+                  activities={dayActivities}
+                  onWorkoutClick={(workoutId) => {
+                    const workout = dayWorkouts.find((w) => w.id === workoutId);
+                    if (workout) setSelectedWorkout(workout);
+                  }}
+                />
               )}
             </button>
           );
@@ -181,7 +190,12 @@ export function MonthCalendar() {
             <div className="stack">
               <h4>Planned workouts</h4>
               {selectedWorkouts.map((workout) => (
-                <WorkoutCard key={workout.id} workout={workout} />
+                <WorkoutCard
+                  key={workout.id}
+                  workout={workout}
+                  compact
+                  onSelect={() => setSelectedWorkout(workout)}
+                />
               ))}
             </div>
           )}
@@ -197,6 +211,10 @@ export function MonthCalendar() {
             <p className="muted">Nothing scheduled or completed on this day.</p>
           )}
         </div>
+      )}
+
+      {selectedWorkout && (
+        <WorkoutDetailModal workout={selectedWorkout} onClose={() => setSelectedWorkout(null)} />
       )}
     </div>
   );

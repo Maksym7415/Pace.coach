@@ -1,0 +1,37 @@
+---
+description: Enable RLS on every new public table (Supabase PostgREST security)
+globs: backend/migrations/**/*.py
+alwaysApply: false
+---
+
+## Rule
+
+Production uses Supabase as PostgreSQL only. Tables in `public` are exposed via PostgREST unless Row Level Security (RLS) is enabled.
+
+Every Alembic migration that creates a table in `public` MUST enable RLS in the same migration. Do not add RLS policies for `anon` or `authenticated`.
+
+## Required pattern
+
+In `upgrade()`, immediately after `op.create_table(...)`:
+
+```python
+op.execute("ALTER TABLE public.<table_name> ENABLE ROW LEVEL SECURITY")
+```
+
+In `downgrade()`, before `op.drop_table(...)`:
+
+```python
+op.execute("ALTER TABLE public.<table_name> DISABLE ROW LEVEL SECURITY")
+```
+
+## Why
+
+- No policies + RLS enabled blocks Supabase Data API access.
+- The FastAPI backend connects as `postgres` (superuser) and bypasses RLS.
+- Matches `q4e5f6a7b8c9_enable_rls_all_public_tables.py` and `f3a4b5c6d7e8_enable_rls_alembic_version.py`.
+
+## Do not
+
+- Rely on a separate follow-up migration to enable RLS.
+- Add permissive policies for `anon`/`authenticated` unless explicitly building Supabase client access.
+- Put application tables outside `public` without updating this rule.

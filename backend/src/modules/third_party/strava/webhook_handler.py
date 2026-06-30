@@ -13,8 +13,9 @@ import requests
 from sqlalchemy import func
 
 from src.core.database import SessionLocal
+from src.modules.athlete_profile.models import Sport
 from src.modules.gear_track.models import Activity, ActivityGearUsage, Gear
-from src.modules.gear_track.service import _gear_usage_value
+from src.modules.gear_track.service import _gear_type_for_sport_code, _gear_usage_value
 from src.modules.third_party.strava.models import UserStrava
 from src.modules.training.activity_link import try_link_activity_to_workout
 
@@ -50,23 +51,23 @@ def _fetch_strava_activity(access_token: str, object_id: int):
     return last_resp
 
 
-def _map_strava_sport_to_activity_type(sport_type: str) -> str:
-    """Map Strava sport_type to internal activity_type (run, bike, swim, other)."""
+def _map_strava_sport_to_sport_code(sport_type: str) -> str | None:
+    """Map Strava sport_type to internal sport code (running, cycling, swimming)."""
     if not sport_type:
-        return "other"
+        return None
     st = sport_type.strip()
     if st in RUN_TYPES or st.startswith("Run"):
-        return "run"
+        return "running"
     if st in BIKE_TYPES:
-        return "bike"
+        return "cycling"
     if st in SWIM_TYPES:
-        return "swim"
-    return "other"
+        return "swimming"
+    return None
 
 
 def _is_supported_sport(sport_type: str) -> bool:
-    """Check if we import this sport (run, bike, swim)."""
-    return _map_strava_sport_to_activity_type(sport_type) in ("run", "bike", "swim")
+    """Check if we import this sport (running, cycling, swimming)."""
+    return _map_strava_sport_to_sport_code(sport_type) is not None
 
 
 def _parse_strava_local_start(iso: str) -> date:
@@ -175,7 +176,13 @@ def process_activity_create(owner_id: int, object_id: int) -> None:
             if not _is_supported_sport(sport_type):
                 logger.info("Skipping unsupported Strava sport_type=%s", sport_type)
                 return
-            activity_type = _map_strava_sport_to_activity_type(sport_type)
+            sport_code = _map_strava_sport_to_sport_code(sport_type)
+            if not sport_code:
+                return
+            sport = db.query(Sport).filter_by(code=sport_code, is_active=True).first()
+            if not sport:
+                logger.warning("Sport not found for code=%s", sport_code)
+                return
             distance_m = data.get("distance") or 0
             distance_km = round(distance_m / 1000.0, 2)
             moving_time_sec = data.get("moving_time") or 0
@@ -189,23 +196,27 @@ def process_activity_create(owner_id: int, object_id: int) -> None:
                 date=date,
                 total_distance_km=distance_km if distance_km else 0,
                 total_hours=moving_hours,
-                activity_type=activity_type,
+                sport_id=sport.id,
+                activity_type_id=None,
                 source="strava",
                 strava_activity_id=object_id,
             )
             db.add(activity)
             db.flush()
 
-            default_gear = (
-                db.query(Gear)
-                .filter_by(
-                    user_id=us.user_id,
-                    activity_type=activity_type,
-                    is_default=True,
-                    status="active",
+            gear_type = _gear_type_for_sport_code(sport_code)
+            default_gear = None
+            if gear_type:
+                default_gear = (
+                    db.query(Gear)
+                    .filter_by(
+                        user_id=us.user_id,
+                        activity_type=gear_type,
+                        is_default=True,
+                        status="active",
+                    )
+                    .first()
                 )
-                .first()
-            )
             if default_gear:
                 value = _gear_usage_value(
                     default_gear,
@@ -227,7 +238,7 @@ def process_activity_create(owner_id: int, object_id: int) -> None:
                     default_gear.value_covered = round(float(total), 2)
 
             try_link_activity_to_workout(
-                db, us.user_id, activity.id, date, activity_type
+                db, us.user_id, activity.id, date, sport_code
             )
 
             db.commit()

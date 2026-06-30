@@ -4,17 +4,26 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 
 from sqlalchemy import delete, func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
+from src.modules.athlete_profile.models import Sport
 from src.modules.gear_track.models import (
     Activity,
     ActivityGearUsage,
+    ActivityType,
     Gear,
     GearInstallation,
     GearService,
     GearServiceLog,
 )
 from src.modules.training.activity_link import try_link_activity_to_workout
+
+_SPORT_CODE_TO_GEAR_TYPE = {
+    "running": "run",
+    "cycling": "bike",
+    "swimming": "swim",
+    "strength": "strength",
+}
 
 
 def _round_km(value, default=0.0):
@@ -96,6 +105,12 @@ def _recompute_gear_value_covered(db: Session, gear_id: int) -> None:
     gear.value_covered = round(float(total), 2)
 
 
+def _gear_type_for_sport_code(sport_code: str | None) -> str | None:
+    if not sport_code:
+        return None
+    return _SPORT_CODE_TO_GEAR_TYPE.get(sport_code)
+
+
 def _activity_to_json(a, include_shoes=False, include_gear=False):
     out = {
         "id": a.id,
@@ -104,7 +119,10 @@ def _activity_to_json(a, include_shoes=False, include_gear=False):
         "total_distance_km": a.total_distance_km,
         "total_hours": a.total_hours,
         "total_sessions": a.total_sessions,
-        "activity_type": a.activity_type,
+        "sport_id": a.sport_id,
+        "sport_code": a.sport.code if a.sport else None,
+        "activity_type_id": a.activity_type_id,
+        "activity_type_code": a.activity_type.code if a.activity_type else None,
         "source": a.source,
         "strava_activity_id": a.strava_activity_id,
         "created_at": a.created_at.isoformat() if a.created_at else None,
@@ -318,7 +336,11 @@ class GearTrackService:
             if (end_date - start_date).days > 365:
                 return None, "Date range cannot exceed 365 days", 400
 
-        stmt = select(Activity).where(Activity.user_id == user_id)
+        stmt = (
+            select(Activity)
+            .options(joinedload(Activity.sport), joinedload(Activity.activity_type))
+            .where(Activity.user_id == user_id)
+        )
         if start_date is not None:
             stmt = stmt.where(Activity.date >= start_date)
         if end_date is not None:
@@ -330,9 +352,8 @@ class GearTrackService:
         data = data or {}
         name = (data.get("name") or "").strip()
         date_str = data.get("date")
-        activity_type = (data.get("activity_type") or "run").strip().lower()
-        if activity_type not in ("run", "bike", "swim", "other"):
-            activity_type = "run"
+        sport_id = data.get("sport_id")
+        activity_type_id = data.get("activity_type_id")
         total_distance_km = _round_km(data.get("total_distance_km"), 0.0)
         total_hours = data.get("total_hours")
         if total_hours is not None:
@@ -352,6 +373,35 @@ class GearTrackService:
             return None, "name is required", 400
         if not date_str:
             return None, "date is required", 400
+        if sport_id is None:
+            return None, "sport_id is required", 400
+        try:
+            sport_id = int(sport_id)
+        except (TypeError, ValueError):
+            return None, "Invalid sport_id", 400
+
+        sport = self.db.scalar(
+            select(Sport).where(Sport.id == sport_id, Sport.is_active.is_(True))
+        )
+        if not sport:
+            return None, "Sport not found", 404
+
+        resolved_activity_type_id = None
+        if activity_type_id is not None:
+            try:
+                resolved_activity_type_id = int(activity_type_id)
+            except (TypeError, ValueError):
+                return None, "Invalid activity_type_id", 400
+            activity_type = self.db.scalar(
+                select(ActivityType).where(
+                    ActivityType.id == resolved_activity_type_id,
+                    ActivityType.sport_id == sport_id,
+                    ActivityType.is_active.is_(True),
+                )
+            )
+            if not activity_type:
+                return None, "Activity type not found for this sport", 404
+
         try:
             date = datetime.fromisoformat(date_str.replace("Z", "+00:00")).date()
         except (ValueError, TypeError):
@@ -364,17 +414,19 @@ class GearTrackService:
             total_distance_km=total_distance_km,
             total_hours=total_hours,
             total_sessions=total_sessions,
-            activity_type=activity_type,
+            sport_id=sport_id,
+            activity_type_id=resolved_activity_type_id,
             source="manual",
         )
         self.db.add(activity)
         self.db.flush()
 
-        if auto_add_default:
+        gear_type = _gear_type_for_sport_code(sport.code)
+        if auto_add_default and gear_type:
             default_gear = self.db.scalar(
                 select(Gear).where(
                     Gear.user_id == user_id,
-                    Gear.activity_type == activity_type,
+                    Gear.activity_type == gear_type,
                     Gear.is_default.is_(True),
                     Gear.status == "active",
                 )
@@ -396,11 +448,16 @@ class GearTrackService:
                     _recompute_gear_value_covered(self.db, default_gear.id)
 
         try_link_activity_to_workout(
-            self.db, user_id, activity.id, date, activity_type
+            self.db, user_id, activity.id, date, sport.code
         )
 
         self.db.commit()
         self.db.refresh(activity)
+        activity = self.db.scalar(
+            select(Activity)
+            .options(joinedload(Activity.sport), joinedload(Activity.activity_type))
+            .where(Activity.id == activity.id)
+        )
         return {
             "success": True,
             "activity": _activity_to_json(activity, include_shoes=True, include_gear=True),
@@ -408,7 +465,9 @@ class GearTrackService:
 
     def get_activity(self, user_id: int, activity_id: int) -> tuple[dict | None, str | None, int]:
         activity = self.db.scalar(
-            select(Activity).where(Activity.id == activity_id, Activity.user_id == user_id)
+            select(Activity)
+            .options(joinedload(Activity.sport), joinedload(Activity.activity_type))
+            .where(Activity.id == activity_id, Activity.user_id == user_id)
         )
         if not activity:
             return None, "Activity not found", 404
@@ -434,10 +493,42 @@ class GearTrackService:
                 activity.date = datetime.fromisoformat(str(data["date"]).replace("Z", "+00:00")).date()
             except (ValueError, TypeError):
                 pass
-        if "activity_type" in data and data["activity_type"]:
-            at = str(data["activity_type"]).strip().lower()
-            if at in ("run", "bike", "swim", "other"):
-                activity.activity_type = at
+        if "activity_type_id" in data:
+            if data["activity_type_id"] is None:
+                activity.activity_type_id = None
+            else:
+                try:
+                    type_id = int(data["activity_type_id"])
+                except (TypeError, ValueError):
+                    return None, "Invalid activity_type_id", 400
+                sport_id = activity.sport_id
+                if sport_id is None:
+                    return None, "sport_id must be set before activity_type_id", 400
+                activity_type = self.db.scalar(
+                    select(ActivityType).where(
+                        ActivityType.id == type_id,
+                        ActivityType.sport_id == sport_id,
+                        ActivityType.is_active.is_(True),
+                    )
+                )
+                if not activity_type:
+                    return None, "Activity type not found for this sport", 404
+                activity.activity_type_id = type_id
+        if "sport_id" in data and data["sport_id"] is not None:
+            try:
+                sport_id = int(data["sport_id"])
+            except (TypeError, ValueError):
+                return None, "Invalid sport_id", 400
+            sport = self.db.scalar(
+                select(Sport).where(Sport.id == sport_id, Sport.is_active.is_(True))
+            )
+            if not sport:
+                return None, "Sport not found", 404
+            if activity.activity_type_id is not None:
+                activity_type = self.db.get(ActivityType, activity.activity_type_id)
+                if not activity_type or activity_type.sport_id != sport_id:
+                    activity.activity_type_id = None
+            activity.sport_id = sport_id
         if "total_distance_km" in data and data["total_distance_km"] is not None:
             try:
                 activity.total_distance_km = round(float(data["total_distance_km"]), 2)
@@ -455,6 +546,11 @@ class GearTrackService:
                 pass
         self.db.commit()
         self.db.refresh(activity)
+        activity = self.db.scalar(
+            select(Activity)
+            .options(joinedload(Activity.sport), joinedload(Activity.activity_type))
+            .where(Activity.id == activity.id)
+        )
         return {
             "success": True,
             "activity": _activity_to_json(activity, include_shoes=True, include_gear=True),

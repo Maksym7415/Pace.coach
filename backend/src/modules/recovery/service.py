@@ -7,6 +7,10 @@ from datetime import date, datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from src.modules.coaching.relations import (
+    COACH_ATHLETE_NOT_LINKED_STATUS,
+    coach_athlete_relation_error,
+)
 from src.modules.identity.models import User
 from src.modules.recovery.models import RecoveryEntry
 from src.modules.recovery.schemas import RecoveryEntryCreateRequest
@@ -152,4 +156,21 @@ class RecoveryService:
         )
         if not entry:
             return None, "No entry for today", 404
+        return {"entry": self._entry_to_dict(entry)}, None, 200
+
+    def get_athlete_today_for_coach(
+        self, coach: User, athlete_id: int, today: date
+    ) -> tuple[dict | None, str | None, int]:
+        err = coach_athlete_relation_error(self.db, coach.id, athlete_id)
+        if err:
+            return None, err, COACH_ATHLETE_NOT_LINKED_STATUS
+
+        entry = self.db.scalar(
+            select(RecoveryEntry).where(
+                RecoveryEntry.user_id == athlete_id,
+                RecoveryEntry.entry_date == today,
+            )
+        )
+        if not entry:
+            return {"entry": None}, None, 200
         return {"entry": self._entry_to_dict(entry)}, None, 200

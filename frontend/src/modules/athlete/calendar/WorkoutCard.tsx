@@ -1,5 +1,7 @@
 import type { Workout } from "../../training/api";
 import { formatActivityMeta } from "../../activities/format";
+import { formatWorkoutPreview } from "../../workout/format";
+import type { WorkoutStepItem } from "../../workout/types";
 
 type WorkoutCardProps = {
   workout: Workout;
@@ -16,16 +18,32 @@ function formatDistance(meters: number | null): string | null {
   return `${(meters / 1000).toFixed(1)} km`;
 }
 
-export function WorkoutCard({ workout, compact = false, onSelect }: WorkoutCardProps) {
+export function WorkoutCard({
+  workout,
+  compact = false,
+  onSelect,
+}: WorkoutCardProps) {
   const distance = formatDistance(workout.distance_m);
   const duration = workout.duration_min ? `${workout.duration_min} min` : null;
-  const meta = [formatWorkoutType(workout.workout_type), workout.status, duration, distance]
+  const sportLabel = workout.sport_name ?? workout.sport_code;
+  const meta = [
+    sportLabel,
+    formatWorkoutType(workout.workout_type),
+    workout.status,
+    duration,
+    distance,
+  ]
     .filter(Boolean)
     .join(" · ");
 
+  const steps = workout.steps as WorkoutStepItem[] | null;
+  const previewLines = formatWorkoutPreview(steps, workout.sport_code, compact);
+
   return (
     <article
-      className={`workout-card ${compact ? "workout-card-compact" : ""}`}
+      className={`workout-card ${compact ? "workout-card-compact" : ""} ${
+        onSelect ? "workout-card-clickable" : ""
+      }`}
       onClick={onSelect}
       onKeyDown={
         onSelect
@@ -43,17 +61,14 @@ export function WorkoutCard({ workout, compact = false, onSelect }: WorkoutCardP
       </div>
       <p className="muted">{meta}</p>
       {!compact && workout.description && <p>{workout.description}</p>}
-      {!compact && Array.isArray(workout.steps) && workout.steps.length > 0 && (
-        <ol className="workout-steps">
-          {(workout.steps as unknown[]).map((step, index) => (
-            <li key={index}>
-              {typeof step === "object" && step !== null
-                ? JSON.stringify(step)
-                : String(step)}
-            </li>
+      {!compact && previewLines.length > 0 && (
+        <ul className="workout-steps workout-preview-list">
+          {previewLines.map((line, index) => (
+            <li key={index}>{line}</li>
           ))}
-        </ol>
+        </ul>
       )}
+      {compact && previewLines.length > 0 && <p className="muted">{previewLines[0]}</p>}
       {workout.linked_activity && (
         <div className="linked-activity">
           <p className="muted">

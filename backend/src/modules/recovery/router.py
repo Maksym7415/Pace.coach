@@ -51,3 +51,16 @@ def list_entries(
     if err:
         raise error_json(status, err)
     return success_json(result)
+
+
+@router.get("/athletes/{athlete_id}/entries/today")
+def coach_get_athlete_today_entry(
+    athlete_id: int,
+    coach: Annotated[User, Depends(require_role(UserRoleEnum.coach))],
+    service: RecoveryService = Depends(get_recovery_service),
+):
+    today = datetime.utcnow().date()
+    result, err, status = service.get_athlete_today_for_coach(coach, athlete_id, today)
+    if err:
+        raise error_json(status, err)
+    return success_json(result)

@@ -10,6 +10,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from src.core.config import APP_ENV
 from src.core.responses import legacy_error_response, success_json
+from src.modules.athlete_profile.router import router as athlete_profile_router
 from src.modules.coaching.router import router as coaching_router
 from src.modules.gear_track.router import router as gear_track_router
 from src.modules.identity.router import router as identity_router
@@ -60,6 +61,7 @@ def create_app() -> FastAPI:
     app.include_router(identity_router)
     app.include_router(gear_track_router)
     app.include_router(strava_router)
+    app.include_router(athlete_profile_router)
     app.include_router(coaching_router)
     app.include_router(recovery_router)
     app.include_router(training_router)

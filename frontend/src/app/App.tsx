@@ -4,9 +4,11 @@ import { LoginPage, RegisterPage } from "../modules/auth/AuthPages";
 import { useAuth } from "../modules/auth/AuthContext";
 import { defaultHomePath } from "../modules/auth/roles";
 import type { UserRole } from "../modules/shared/api";
+import { AthleteProfilePage } from "../modules/athlete-profile/AthleteProfilePage";
 import { AthleteDashboard } from "../modules/athlete/AthleteDashboard";
 import { StravaOAuthPage } from "../modules/athlete/strava/StravaOAuthPage";
 import { CoachDashboard } from "../modules/coach/CoachDashboard";
+import { AthleteDetailPage } from "../modules/coach/AthleteDetailPage";
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -86,10 +88,26 @@ export function App() {
           }
         />
         <Route
+          path="/athlete/profile"
+          element={
+            <RequireRole role="athlete">
+              <AthleteProfilePage />
+            </RequireRole>
+          }
+        />
+        <Route
           path="/coach"
           element={
             <RequireRole role="coach">
               <CoachDashboard />
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/coach/athletes/:athleteId"
+          element={
+            <RequireRole role="coach">
+              <AthleteDetailPage />
             </RequireRole>
           }
         />
