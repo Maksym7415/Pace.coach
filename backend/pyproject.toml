@@ -16,7 +16,6 @@ dependencies = [
     "cryptography",
     "python-dotenv",
     "fitparse",
-    "pandas",
     "gunicorn",
 ]
 
