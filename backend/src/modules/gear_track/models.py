@@ -36,6 +36,7 @@ class Activity(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     date: Mapped[datetime] = mapped_column(Date, nullable=False)
+    start_time: Mapped[datetime | None] = mapped_column(nullable=True, index=True)
     total_distance_km: Mapped[float] = mapped_column(Float, nullable=False)
     total_hours: Mapped[float | None] = mapped_column(Float, nullable=True)
     total_sessions: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -47,13 +48,26 @@ class Activity(Base):
     )
     source: Mapped[str] = mapped_column(String(32), nullable=False)
     strava_activity_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
+    activity_import_id: Mapped[int | None] = mapped_column(
+        ForeignKey("activity_imports.id", ondelete="SET NULL"), nullable=True
+    )
     created_at: Mapped[datetime | None] = mapped_column(default=datetime.utcnow)
 
     user = relationship("User", back_populates="activities")
     sport = relationship("Sport")
     activity_type = relationship("ActivityType")
+    activity_import = relationship("ActivityImport", back_populates="activity")
     activity_gear_usages = relationship(
         "ActivityGearUsage", back_populates="activity", cascade="all, delete-orphan"
+    )
+    activity_laps = relationship(
+        "ActivityLap", back_populates="activity", cascade="all, delete-orphan"
+    )
+    activity_track_points = relationship(
+        "ActivityTrackPoint", back_populates="activity", cascade="all, delete-orphan"
+    )
+    activity_sources = relationship(
+        "ActivitySource", back_populates="activity", cascade="all, delete-orphan"
     )
 
     __table_args__ = (
@@ -63,6 +77,12 @@ class Activity(Base):
             "strava_activity_id",
             unique=True,
             postgresql_where=text("strava_activity_id IS NOT NULL"),
+        ),
+        Index(
+            "uq_activities_activity_import_id",
+            "activity_import_id",
+            unique=True,
+            postgresql_where=text("activity_import_id IS NOT NULL"),
         ),
     )
 

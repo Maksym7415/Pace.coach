@@ -81,6 +81,26 @@ def _parse_strava_utc_start(iso: str) -> date:
     return datetime.fromisoformat(iso.replace("Z", "+00:00")).date()
 
 
+def activity_start_time_from_strava_payload(data: dict) -> datetime | None:
+    """Activity start instant from Strava payload (prefers start_date_local)."""
+    local = data.get("start_date_local")
+    if local:
+        try:
+            cleaned = local.strip().removesuffix("Z")
+            return datetime.fromisoformat(cleaned)
+        except (ValueError, TypeError):
+            logger.warning("Invalid start_date_local from Strava; falling back to start_date")
+
+    utc_start = data.get("start_date")
+    if utc_start:
+        try:
+            return datetime.fromisoformat(utc_start.replace("Z", "+00:00")).replace(tzinfo=None)
+        except (ValueError, TypeError):
+            logger.warning("Invalid start_date from Strava")
+
+    return None
+
+
 def activity_date_from_strava_payload(data: dict) -> date:
     """
     Derive the activity calendar date aligned with the athlete's local day.
@@ -189,11 +209,13 @@ def process_activity_create(owner_id: int, object_id: int) -> None:
             moving_hours = round(moving_time_sec / 3600.0, 2) if moving_time_sec else None
             name = data.get("name") or "Strava Activity"
             date = activity_date_from_strava_payload(data)
+            start_time = activity_start_time_from_strava_payload(data)
 
             activity = Activity(
                 user_id=us.user_id,
                 name=name,
                 date=date,
+                start_time=start_time,
                 total_distance_km=distance_km if distance_km else 0,
                 total_hours=moving_hours,
                 sport_id=sport.id,

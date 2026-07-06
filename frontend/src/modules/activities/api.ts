@@ -4,6 +4,7 @@ export type Activity = {
   id: number;
   name: string;
   date: string;
+  start_time: string | null;
   total_distance_km: number | null;
   total_hours: number | null;
   total_sessions: number | null;

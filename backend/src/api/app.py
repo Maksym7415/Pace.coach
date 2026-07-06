@@ -1,6 +1,8 @@
 """FastAPI application factory."""
 import logging
 import os
+import threading
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import HTTPException
@@ -10,6 +12,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from src.core.config import APP_ENV
 from src.core.responses import legacy_error_response, success_json
+from src.modules.activity_import.router import router as activity_import_router
 from src.modules.athlete_profile.router import router as athlete_profile_router
 from src.modules.coaching.router import router as coaching_router
 from src.modules.gear_track.router import router as gear_track_router
@@ -26,8 +29,32 @@ logging.basicConfig(
 logger = logging.getLogger("coach_app.api")
 
 
+def _recover_stale_activity_imports() -> None:
+    from src.modules.activity_import.deps import _storage_provider, get_import_processor
+    from src.modules.activity_import.recovery import recover_stale_imports
+
+    if _storage_provider is None:
+        return
+
+    processor = get_import_processor()
+
+    def enqueue(import_id: int) -> None:
+        thread = threading.Thread(target=processor, args=(import_id,), daemon=True)
+        thread.start()
+
+    recovered = recover_stale_imports(enqueue)
+    if recovered:
+        logger.info("Recovered %s stale activity import job(s)", recovered)
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    _recover_stale_activity_imports()
+    yield
+
+
 def create_app() -> FastAPI:
-    app = FastAPI(title="Coach App API", version="0.1.0")
+    app = FastAPI(title="Coach App API", version="0.1.0", lifespan=_lifespan)
 
     _frontend_origin = os.environ.get("FRONTEND_WEB_ORIGIN")
     if APP_ENV.lower() == "development":
@@ -60,6 +87,7 @@ def create_app() -> FastAPI:
 
     app.include_router(identity_router)
     app.include_router(gear_track_router)
+    app.include_router(activity_import_router)
     app.include_router(strava_router)
     app.include_router(athlete_profile_router)
     app.include_router(coaching_router)

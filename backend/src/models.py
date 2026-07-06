@@ -17,6 +17,13 @@ from src.modules.athlete_profile.models import (  # noqa: F401
     AthleteZone,
     Sport,
 )
+from src.modules.activity_import.models import (  # noqa: F401
+    ActivityImport,
+    ActivityLap,
+    ActivitySource,
+    ActivityTrackPoint,
+    StoredFile,
+)
 from src.modules.coaching.models import CoachAthleteRelation  # noqa: F401
 from src.modules.identity.models import User, UserRole  # noqa: F401
 from src.modules.recovery.models import RecoveryEntry  # noqa: F401

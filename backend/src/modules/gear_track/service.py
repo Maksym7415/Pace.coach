@@ -116,6 +116,7 @@ def _activity_to_json(a, include_shoes=False, include_gear=False):
         "id": a.id,
         "name": a.name,
         "date": a.date.isoformat() if hasattr(a.date, "isoformat") else str(a.date),
+        "start_time": a.start_time.isoformat() if a.start_time else None,
         "total_distance_km": a.total_distance_km,
         "total_hours": a.total_hours,
         "total_sessions": a.total_sessions,
