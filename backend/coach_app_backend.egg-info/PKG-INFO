@@ -15,7 +15,6 @@ Requires-Dist: requests
 Requires-Dist: cryptography
 Requires-Dist: python-dotenv
 Requires-Dist: fitparse
-Requires-Dist: pandas
 Requires-Dist: gunicorn
 Provides-Extra: dev
 Requires-Dist: httpx; extra == "dev"

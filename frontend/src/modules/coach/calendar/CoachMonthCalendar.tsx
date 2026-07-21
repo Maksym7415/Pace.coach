@@ -1,17 +1,27 @@
 import { useEffect, useMemo, useState } from "react";
+import { listAthleteActivities, type Activity } from "../../activities/api";
 import { deleteWorkout, getAthleteCalendar, type Workout } from "../../training/api";
-import { formatMonthYear, monthBounds, toIsoDate } from "../../shared/dates";
+import { formatMonthYear, monthBounds, toDateKey, toIsoDate } from "../../shared/dates";
+import { ActivityCard } from "../../athlete/activities/ActivityCard";
 import { CalendarDayEvents } from "../../athlete/calendar/CalendarDayEvents";
 import { WorkoutCard } from "../../athlete/calendar/WorkoutCard";
 import { EditWorkoutModal } from "../../workout/EditWorkoutModal";
 import { WorkoutDetailModal } from "../../workout/WorkoutDetailModal";
 
-function groupWorkoutsByDate(workouts: Workout[]): Map<string, Workout[]> {
-  const map = new Map<string, Workout[]>();
-  for (const workout of workouts) {
-    const list = map.get(workout.scheduled_date) ?? [];
-    list.push(workout);
-    map.set(workout.scheduled_date, list);
+function groupByDate<T extends { date?: string; scheduled_date?: string }>(
+  items: T[],
+  dateKey: "date" | "scheduled_date",
+): Map<string, T[]> {
+  const map = new Map<string, T[]>();
+  for (const item of items) {
+    const raw =
+      dateKey === "date"
+        ? (item as { date: string }).date
+        : (item as { scheduled_date: string }).scheduled_date;
+    const iso = toDateKey(raw);
+    const list = map.get(iso) ?? [];
+    list.push(item);
+    map.set(iso, list);
   }
   return map;
 }
@@ -30,6 +40,13 @@ function buildMonthGrid(year: number, month: number): (string | null)[] {
   return cells;
 }
 
+function unlinkedActivitiesForDay(workouts: Workout[], activities: Activity[]): Activity[] {
+  const linkedIds = new Set(
+    workouts.map((w) => w.activity_id).filter((id): id is number => id !== null),
+  );
+  return activities.filter((a) => !linkedIds.has(a.id));
+}
+
 type CoachMonthCalendarProps = {
   athleteId: number;
   refreshKey?: number;
@@ -40,6 +57,7 @@ export function CoachMonthCalendar({ athleteId, refreshKey = 0 }: CoachMonthCale
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth());
   const [workouts, setWorkouts] = useState<Workout[]>([]);
+  const [activities, setActivities] = useState<Activity[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
@@ -49,21 +67,36 @@ export function CoachMonthCalendar({ athleteId, refreshKey = 0 }: CoachMonthCale
   useEffect(() => {
     setLoading(true);
     const { start, end } = monthBounds(year, month);
-    getAthleteCalendar(athleteId, start, end).then((result) => {
-      if (!result.success) {
-        setError(result.error ?? "Failed to load calendar");
+    Promise.all([
+      getAthleteCalendar(athleteId, start, end),
+      listAthleteActivities(athleteId, start, end),
+    ]).then(([workoutResult, activityResult]) => {
+      if (!workoutResult.success) {
+        setError(workoutResult.error ?? "Failed to load calendar");
         setWorkouts([]);
       } else {
         setError(null);
-        setWorkouts(result.workouts);
+        setWorkouts(workoutResult.workouts);
+      }
+      if (activityResult.success && activityResult.activities) {
+        setActivities(activityResult.activities);
+      } else {
+        setActivities([]);
       }
       setLoading(false);
     });
   }, [athleteId, year, month, refreshKey]);
 
-  const byDate = useMemo(() => groupWorkoutsByDate(workouts), [workouts]);
+  const workoutsByDate = useMemo(() => groupByDate(workouts, "scheduled_date"), [workouts]);
+  const activitiesByDate = useMemo(() => groupByDate(activities, "date"), [activities]);
   const grid = useMemo(() => buildMonthGrid(year, month), [year, month]);
-  const selectedWorkouts = selectedDate ? (byDate.get(selectedDate) ?? []) : [];
+
+  const selectedWorkouts = selectedDate ? (workoutsByDate.get(selectedDate) ?? []) : [];
+  const selectedActivities = selectedDate
+    ? unlinkedActivitiesForDay(selectedWorkouts, activitiesByDate.get(selectedDate) ?? [])
+    : [];
+
+  const hasAnyEvents = workouts.length > 0 || activities.length > 0;
 
   function prevMonth() {
     if (month === 0) {
@@ -93,6 +126,19 @@ export function CoachMonthCalendar({ athleteId, refreshKey = 0 }: CoachMonthCale
     setWorkouts((prev) => prev.filter((w) => w.id !== workout.id));
   }
 
+  function refreshCalendar() {
+    const { start, end } = monthBounds(year, month);
+    Promise.all([
+      getAthleteCalendar(athleteId, start, end),
+      listAthleteActivities(athleteId, start, end),
+    ]).then(([workoutResult, activityResult]) => {
+      if (workoutResult.success) setWorkouts(workoutResult.workouts);
+      if (activityResult.success && activityResult.activities) {
+        setActivities(activityResult.activities);
+      }
+    });
+  }
+
   return (
     <div className="stack">
       <div className="row-between">
@@ -111,8 +157,8 @@ export function CoachMonthCalendar({ athleteId, refreshKey = 0 }: CoachMonthCale
       {loading && <p className="muted">Loading calendar…</p>}
       {error && <p className="error">{error}</p>}
 
-      {!loading && !error && workouts.length === 0 && (
-        <p className="muted">No workouts scheduled this month yet.</p>
+      {!loading && !error && !hasAnyEvents && (
+        <p className="muted">No planned workouts or completed activities this month yet.</p>
       )}
 
       <div className="calendar-weekdays">
@@ -124,22 +170,27 @@ export function CoachMonthCalendar({ athleteId, refreshKey = 0 }: CoachMonthCale
       <div className="calendar-grid">
         {grid.map((iso, index) => {
           if (!iso) return <div key={`empty-${index}`} className="calendar-cell empty" />;
-          const dayWorkouts = byDate.get(iso) ?? [];
+          const dayWorkouts = workoutsByDate.get(iso) ?? [];
+          const dayActivities = unlinkedActivitiesForDay(
+            dayWorkouts,
+            activitiesByDate.get(iso) ?? [],
+          );
+          const hasEvents = dayWorkouts.length > 0 || dayActivities.length > 0;
           const dayNum = Number(iso.split("-")[2]);
           return (
             <button
               key={iso}
               type="button"
-              className={`calendar-cell ${dayWorkouts.length ? "has-workout" : ""} ${
+              className={`calendar-cell ${hasEvents ? "has-workout" : ""} ${
                 selectedDate === iso ? "selected" : ""
               }`}
               onClick={() => setSelectedDate(iso)}
             >
               <span className="calendar-day">{dayNum}</span>
-              {dayWorkouts.length > 0 && (
+              {hasEvents && (
                 <CalendarDayEvents
                   workouts={dayWorkouts}
-                  activities={[]}
+                  activities={dayActivities}
                   onWorkoutClick={(workoutId) => {
                     const workout = dayWorkouts.find((w) => w.id === workoutId);
                     if (workout) setSelectedWorkout(workout);
@@ -153,18 +204,30 @@ export function CoachMonthCalendar({ athleteId, refreshKey = 0 }: CoachMonthCale
 
       {selectedDate && (
         <div className="card stack">
-          <h4>Workouts on {selectedDate}</h4>
-          {selectedWorkouts.length === 0 ? (
-            <p className="muted">No workouts scheduled.</p>
-          ) : (
-            selectedWorkouts.map((workout) => (
-              <WorkoutCard
-                key={workout.id}
-                workout={workout}
-                compact
-                onSelect={() => setSelectedWorkout(workout)}
-              />
-            ))
+          <h4>{selectedDate}</h4>
+          {selectedWorkouts.length > 0 && (
+            <div className="stack">
+              <h4>Planned workouts</h4>
+              {selectedWorkouts.map((workout) => (
+                <WorkoutCard
+                  key={workout.id}
+                  workout={workout}
+                  compact
+                  onSelect={() => setSelectedWorkout(workout)}
+                />
+              ))}
+            </div>
+          )}
+          {selectedActivities.length > 0 && (
+            <div className="stack">
+              <h4>Completed activities</h4>
+              {selectedActivities.map((activity) => (
+                <ActivityCard key={activity.id} activity={activity} />
+              ))}
+            </div>
+          )}
+          {selectedWorkouts.length === 0 && selectedActivities.length === 0 && (
+            <p className="muted">Nothing scheduled or completed on this day.</p>
           )}
         </div>
       )}
@@ -190,10 +253,7 @@ export function CoachMonthCalendar({ athleteId, refreshKey = 0 }: CoachMonthCale
           athleteId={athleteId}
           onClose={() => setEditingWorkoutId(null)}
           onSaved={() => {
-            const { start, end } = monthBounds(year, month);
-            getAthleteCalendar(athleteId, start, end).then((result) => {
-              if (result.success) setWorkouts(result.workouts);
-            });
+            refreshCalendar();
           }}
         />
       )}

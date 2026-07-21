@@ -10,7 +10,6 @@ requests
 cryptography
 python-dotenv
 fitparse
-pandas
 gunicorn
 
 [dev]

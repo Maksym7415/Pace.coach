@@ -41,6 +41,10 @@ def _build_database_url() -> str:
 
 DATABASE_URL = _build_database_url()
 
+ACTIVITY_STORAGE_ROOT = Path(
+    os.environ.get("ACTIVITY_STORAGE_PATH", str(_BACKEND_ROOT / "storage"))
+).resolve()
+
 
 def _require_env(name: str) -> str:
     value = os.environ.get(name)

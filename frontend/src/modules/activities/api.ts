@@ -1,4 +1,4 @@
-import { apiGet } from "../shared/api";
+import { apiFetch, apiGet, type ApiEnvelope } from "../shared/api";
 
 export type Activity = {
   id: number;
@@ -31,6 +31,11 @@ export type ActivitySummary = Pick<
   | "source"
 >;
 
+export type FitImportResult = {
+  jobId: string;
+  status: string;
+};
+
 export async function listActivities(startDate?: string, endDate?: string) {
   const params = new URLSearchParams();
   if (startDate) params.set("start_date", startDate);
@@ -39,6 +44,35 @@ export async function listActivities(startDate?: string, endDate?: string) {
   return apiGet<{ activities: Activity[] }>(`/api/activities${query ? `?${query}` : ""}`);
 }
 
+export async function listAthleteActivities(
+  athleteId: number,
+  startDate?: string,
+  endDate?: string,
+) {
+  const params = new URLSearchParams();
+  if (startDate) params.set("start_date", startDate);
+  if (endDate) params.set("end_date", endDate);
+  const query = params.toString();
+  return apiGet<{ activities: Activity[] }>(
+    `/api/activities/athletes/${athleteId}${query ? `?${query}` : ""}`,
+  );
+}
+
 export async function getActivity(activityId: number) {
   return apiGet<{ activity: Activity }>(`/api/activities/${activityId}`);
+}
+
+export async function importFitFile(
+  athleteId: number,
+  file: File,
+): Promise<ApiEnvelope<FitImportResult>> {
+  const formData = new FormData();
+  formData.append("athlete_id", String(athleteId));
+  formData.append("file", file);
+
+  const response = await apiFetch("/api/activities/import/fit", {
+    method: "POST",
+    body: formData,
+  });
+  return response.json();
 }

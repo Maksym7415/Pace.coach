@@ -10,9 +10,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from src.core.config import APP_ENV
+from src.core.config import APP_ENV, IS_PRODUCTION, ACTIVITY_STORAGE_ROOT
 from src.core.responses import legacy_error_response, success_json
 from src.modules.activity_import.router import router as activity_import_router
+from src.modules.activity_import.deps import configure_storage_provider
+from src.modules.activity_import.local_storage import LocalFilesystemStorage
 from src.modules.athlete_profile.router import router as athlete_profile_router
 from src.modules.coaching.router import router as coaching_router
 from src.modules.gear_track.router import router as gear_track_router
@@ -55,6 +57,9 @@ async def _lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     app = FastAPI(title="Coach App API", version="0.1.0", lifespan=_lifespan)
+
+    if not IS_PRODUCTION:
+        configure_storage_provider(LocalFilesystemStorage(ACTIVITY_STORAGE_ROOT))
 
     _frontend_origin = os.environ.get("FRONTEND_WEB_ORIGIN")
     if APP_ENV.lower() == "development":

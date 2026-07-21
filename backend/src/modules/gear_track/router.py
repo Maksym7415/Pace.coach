@@ -1,6 +1,6 @@
 """Gear and activities API routes."""
 from datetime import date
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Body, Depends, Query
 
@@ -8,6 +8,8 @@ from src.core.auth import CurrentUser
 from src.core.responses import error_json, success_json
 from src.modules.gear_track.deps import get_gear_track_service
 from src.modules.gear_track.service import GearTrackService
+from src.modules.identity.deps import require_role
+from src.modules.identity.models import User, UserRoleEnum
 
 router = APIRouter(tags=["gear"])
 
@@ -103,6 +105,22 @@ def create_activity(
 ):
     result, err, status = service.create_activity(user.id, body)
     return _handle(result, err, status)
+
+
+@router.get("/api/activities/athletes/{athlete_id}")
+def list_athlete_activities_for_coach(
+    athlete_id: int,
+    coach: Annotated[User, Depends(require_role(UserRoleEnum.coach))],
+    start_date: date | None = Query(None),
+    end_date: date | None = Query(None),
+    service: GearTrackService = Depends(get_gear_track_service),
+):
+    result, err, status = service.list_activities_for_coach(
+        coach, athlete_id, start_date, end_date
+    )
+    if err:
+        raise error_json(status, err)
+    return success_json(result)
 
 
 @router.get("/api/activities/{activity_id}")

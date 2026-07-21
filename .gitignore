@@ -9,4 +9,5 @@ node_modules/
 frontend/dist/
 *.tsbuildinfo
 backend/.pytest_cache/
+backend/storage/
 .DS_Store

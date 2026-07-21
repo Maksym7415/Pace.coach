@@ -7,6 +7,10 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session, joinedload
 
 from src.modules.athlete_profile.models import Sport
+from src.modules.coaching.relations import (
+    COACH_ATHLETE_NOT_LINKED_STATUS,
+    coach_athlete_relation_error,
+)
 from src.modules.gear_track.models import (
     Activity,
     ActivityGearUsage,
@@ -16,6 +20,7 @@ from src.modules.gear_track.models import (
     GearService,
     GearServiceLog,
 )
+from src.modules.identity.models import User
 from src.modules.training.activity_link import try_link_activity_to_workout
 
 _SPORT_CODE_TO_GEAR_TYPE = {
@@ -348,6 +353,18 @@ class GearTrackService:
             stmt = stmt.where(Activity.date <= end_date)
         activities = self.db.scalars(stmt.order_by(Activity.date.desc())).all()
         return {"success": True, "activities": [_activity_to_json(a) for a in activities]}, None, 200
+
+    def list_activities_for_coach(
+        self,
+        coach: User,
+        athlete_id: int,
+        start_date: date | None = None,
+        end_date: date | None = None,
+    ) -> tuple[dict | None, str | None, int]:
+        relation_err = coach_athlete_relation_error(self.db, coach.id, athlete_id)
+        if relation_err:
+            return None, relation_err, COACH_ATHLETE_NOT_LINKED_STATUS
+        return self.list_activities(athlete_id, start_date, end_date)
 
     def create_activity(self, user_id: int, data: dict) -> tuple[dict | None, str | None, int]:
         data = data or {}
