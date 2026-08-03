@@ -43,7 +43,7 @@ export function LoginPage() {
           <input value={password} onChange={(e) => setPassword(e.target.value)} type="password" required />
         </label>
         {error && <p className="error">{error}</p>}
-        <button type="submit">Sign in</button>
+        <button type="submit" className="primary">Sign in</button>
       </form>
       <p className="muted">
         No account? <Link to="/register">Register</Link>
@@ -106,7 +106,7 @@ export function RegisterPage() {
           <input value={password} onChange={(e) => setPassword(e.target.value)} type="password" required />
         </label>
         {error && <p className="error">{error}</p>}
-        <button type="submit">Register</button>
+        <button type="submit" className="primary">Register</button>
       </form>
       <p className="muted">
         Already have an account? <Link to="/login">Sign in</Link>

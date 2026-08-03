@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from src.modules.activity_import.service import ActivityIngestionService
+from src.modules.fit_parser.models import ActivityMeta
 
 
 def _activity(
@@ -145,3 +146,37 @@ class TestChecksumDedup:
         service = ActivityIngestionService(db=db, storage=MagicMock(), queue=MagicMock())
 
         assert service._checksum_import_conflict(1, "abc123") == "This file has already been imported"
+
+
+class TestBuildActivityName:
+    def test_prefers_activity_type_over_sport_and_device(self, service: ActivityIngestionService):
+        meta = ActivityMeta(
+            sport="cycling",
+            activity_type="road_ride",
+            device_name="garmin 3843",
+            start_time=datetime(2026, 7, 23, 10, 0, 0),
+        )
+
+        assert service._build_activity_name(meta) == "Road Ride · 2026-07-23"
+
+    def test_falls_back_to_sport_when_activity_type_missing(self, service: ActivityIngestionService):
+        meta = ActivityMeta(
+            sport="running",
+            device_name="garmin fenix2",
+            start_time=datetime(2026, 7, 6, 8, 0, 0),
+        )
+
+        assert service._build_activity_name(meta) == "Running · 2026-07-06"
+
+    def test_does_not_use_device_name(self, service: ActivityIngestionService):
+        meta = ActivityMeta(device_name="garmin 3843", start_time=datetime(2026, 7, 23, 10, 0, 0))
+
+        assert service._build_activity_name(meta) == "Imported Activity · 2026-07-23"
+
+    def test_missing_start_time_omits_date(self, service: ActivityIngestionService):
+        meta = ActivityMeta(sport="cycling", activity_type="gravel_ride")
+
+        assert service._build_activity_name(meta) == "Gravel Ride"
+
+    def test_fully_missing_meta_uses_imported_activity(self, service: ActivityIngestionService):
+        assert service._build_activity_name(ActivityMeta()) == "Imported Activity"

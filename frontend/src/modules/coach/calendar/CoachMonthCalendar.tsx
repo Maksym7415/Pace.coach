@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { listAthleteActivities, type Activity } from "../../activities/api";
 import { deleteWorkout, getAthleteCalendar, type Workout } from "../../training/api";
 import { formatMonthYear, monthBounds, toDateKey, toIsoDate } from "../../shared/dates";
 import { ActivityCard } from "../../athlete/activities/ActivityCard";
 import { CalendarDayEvents } from "../../athlete/calendar/CalendarDayEvents";
 import { WorkoutCard } from "../../athlete/calendar/WorkoutCard";
-import { EditWorkoutModal } from "../../workout/EditWorkoutModal";
 import { WorkoutDetailModal } from "../../workout/WorkoutDetailModal";
 
 function groupByDate<T extends { date?: string; scheduled_date?: string }>(
@@ -50,9 +50,15 @@ function unlinkedActivitiesForDay(workouts: Workout[], activities: Activity[]): 
 type CoachMonthCalendarProps = {
   athleteId: number;
   refreshKey?: number;
+  onCalendarChanged?: () => void;
 };
 
-export function CoachMonthCalendar({ athleteId, refreshKey = 0 }: CoachMonthCalendarProps) {
+export function CoachMonthCalendar({
+  athleteId,
+  refreshKey = 0,
+  onCalendarChanged,
+}: CoachMonthCalendarProps) {
+  const navigate = useNavigate();
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth());
@@ -62,7 +68,6 @@ export function CoachMonthCalendar({ athleteId, refreshKey = 0 }: CoachMonthCale
   const [error, setError] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [selectedWorkout, setSelectedWorkout] = useState<Workout | null>(null);
-  const [editingWorkoutId, setEditingWorkoutId] = useState<number | null>(null);
 
   useEffect(() => {
     setLoading(true);
@@ -124,19 +129,8 @@ export function CoachMonthCalendar({ athleteId, refreshKey = 0 }: CoachMonthCale
       return;
     }
     setWorkouts((prev) => prev.filter((w) => w.id !== workout.id));
-  }
-
-  function refreshCalendar() {
-    const { start, end } = monthBounds(year, month);
-    Promise.all([
-      getAthleteCalendar(athleteId, start, end),
-      listAthleteActivities(athleteId, start, end),
-    ]).then(([workoutResult, activityResult]) => {
-      if (workoutResult.success) setWorkouts(workoutResult.workouts);
-      if (activityResult.success && activityResult.activities) {
-        setActivities(activityResult.activities);
-      }
-    });
+    setSelectedWorkout(null);
+    onCalendarChanged?.();
   }
 
   return (
@@ -191,8 +185,8 @@ export function CoachMonthCalendar({ athleteId, refreshKey = 0 }: CoachMonthCale
                 <CalendarDayEvents
                   workouts={dayWorkouts}
                   activities={dayActivities}
-                  onWorkoutClick={(workoutId) => {
-                    const workout = dayWorkouts.find((w) => w.id === workoutId);
+                  onWorkoutClick={(id) => {
+                    const workout = dayWorkouts.find((w) => w.id === id);
                     if (workout) setSelectedWorkout(workout);
                   }}
                 />
@@ -204,7 +198,14 @@ export function CoachMonthCalendar({ athleteId, refreshKey = 0 }: CoachMonthCale
 
       {selectedDate && (
         <div className="card stack">
-          <h4>{selectedDate}</h4>
+          <div className="row-between">
+            <h4>{selectedDate}</h4>
+            <Link to={`/planning/workout/new?athleteId=${athleteId}&date=${selectedDate}`}>
+              <button type="button" className="secondary">
+                Schedule workout
+              </button>
+            </Link>
+          </div>
           {selectedWorkouts.length > 0 && (
             <div className="stack">
               <h4>Planned workouts</h4>
@@ -239,22 +240,11 @@ export function CoachMonthCalendar({ athleteId, refreshKey = 0 }: CoachMonthCale
           coachActions={
             selectedWorkout.status === "scheduled"
               ? {
-                  onEdit: () => setEditingWorkoutId(selectedWorkout.id),
+                  onEdit: () => navigate(`/planning/workout/${selectedWorkout.id}`),
                   onDelete: () => handleDelete(selectedWorkout),
                 }
               : undefined
           }
-        />
-      )}
-
-      {editingWorkoutId != null && (
-        <EditWorkoutModal
-          workoutId={editingWorkoutId}
-          athleteId={athleteId}
-          onClose={() => setEditingWorkoutId(null)}
-          onSaved={() => {
-            refreshCalendar();
-          }}
         />
       )}
     </div>

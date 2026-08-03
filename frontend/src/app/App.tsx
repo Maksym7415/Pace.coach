@@ -1,14 +1,25 @@
-import { Link, Navigate, Outlet, Route, Routes, useLocation } from "react-router-dom";
+import { Navigate, Outlet, Route, Routes } from "react-router-dom";
 import { getToken } from "../modules/shared/api";
 import { LoginPage, RegisterPage } from "../modules/auth/AuthPages";
 import { useAuth } from "../modules/auth/AuthContext";
 import { defaultHomePath } from "../modules/auth/roles";
 import type { UserRole } from "../modules/shared/api";
 import { AthleteProfilePage } from "../modules/athlete-profile/AthleteProfilePage";
-import { AthleteDashboard } from "../modules/athlete/AthleteDashboard";
+import { ActivitiesPage, AthleteSettingsPage } from "../modules/athlete/ActivitiesPage";
 import { StravaOAuthPage } from "../modules/athlete/strava/StravaOAuthPage";
 import { CoachDashboard } from "../modules/coach/CoachDashboard";
 import { AthleteDetailPage } from "../modules/coach/AthleteDetailPage";
+import { PlanningHubPage } from "../modules/coach/PlanningHubPage";
+import { TemplatesPage } from "../modules/coach/TemplatesPage";
+import {
+  EditWorkoutBuilderPage,
+  NewWorkoutBuilderPage,
+  TemplateBuilderPage,
+} from "../modules/workout/builder/CoachWorkoutBuilderPage";
+import { TodayPage } from "../modules/today/TodayPage";
+import { ActivityDetailsPage } from "../modules/activities/ActivityDetailsPage";
+import { AppLayout } from "../modules/shell/AppLayout";
+import { ComingSoonPage } from "../modules/shell/ComingSoonPage";
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -35,34 +46,20 @@ function RoleRedirect() {
   return <Navigate to={defaultHomePath(user.roles)} replace />;
 }
 
-function AppLayout() {
-  const location = useLocation();
-  const { hasRole, logout } = useAuth();
+function ActivitiesOrComingSoon() {
+  const { hasRole } = useAuth();
+  if (hasRole("athlete")) return <ActivitiesPage />;
+  if (hasRole("coach")) return <ComingSoonPage title="Activities" />;
+  return <Navigate to="/today" replace />;
+}
 
+function AuthenticatedShell() {
   return (
-    <div className="app-shell">
-      <header className="app-header">
-        <strong>Coach App</strong>
-        <nav>
-          {hasRole("athlete") && (
-            <Link to="/athlete" className={location.pathname.startsWith("/athlete") ? "active" : ""}>
-              Athlete
-            </Link>
-          )}
-          {hasRole("coach") && (
-            <Link to="/coach" className={location.pathname.startsWith("/coach") ? "active" : ""}>
-              Coach
-            </Link>
-          )}
-          <button type="button" className="secondary" onClick={logout}>
-            Log out
-          </button>
-        </nav>
-      </header>
-      <main className="app-main">
+    <RequireAuth>
+      <AppLayout>
         <Outlet />
-      </main>
-    </div>
+      </AppLayout>
+    </RequireAuth>
   );
 }
 
@@ -71,19 +68,23 @@ export function App() {
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
-      <Route
-        element={
-          <RequireAuth>
-            <AppLayout />
-          </RequireAuth>
-        }
-      >
+      <Route element={<AuthenticatedShell />}>
         <Route path="/" element={<RoleRedirect />} />
+        <Route path="/today" element={<TodayPage />} />
+        <Route path="/activity/:activityId" element={<ActivityDetailsPage />} />
+
+        <Route path="/athlete" element={<Navigate to="/today" replace />} />
+        <Route path="/coach" element={<Navigate to="/today" replace />} />
+
         <Route
-          path="/athlete"
+          path="/activities"
+          element={<ActivitiesOrComingSoon />}
+        />
+        <Route
+          path="/settings"
           element={
             <RequireRole role="athlete">
-              <AthleteDashboard />
+              <AthleteSettingsPage />
             </RequireRole>
           }
         />
@@ -96,7 +97,31 @@ export function App() {
           }
         />
         <Route
-          path="/coach"
+          path="/performance"
+          element={
+            <RequireRole role="athlete">
+              <Navigate to="/athlete/profile" replace />
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/plan"
+          element={
+            <RequireRole role="athlete">
+              <ComingSoonPage title="Plan" />
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/recovery"
+          element={
+            <RequireRole role="athlete">
+              <ComingSoonPage title="Recovery" />
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/athletes"
           element={
             <RequireRole role="coach">
               <CoachDashboard />
@@ -108,6 +133,62 @@ export function App() {
           element={
             <RequireRole role="coach">
               <AthleteDetailPage />
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/planning"
+          element={
+            <RequireRole role="coach">
+              <PlanningHubPage />
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/planning/workout/new"
+          element={
+            <RequireRole role="coach">
+              <NewWorkoutBuilderPage />
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/planning/workout/:workoutId"
+          element={
+            <RequireRole role="coach">
+              <EditWorkoutBuilderPage />
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/analysis"
+          element={
+            <RequireRole role="coach">
+              <ComingSoonPage title="Analysis" />
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/templates"
+          element={
+            <RequireRole role="coach">
+              <TemplatesPage />
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/templates/new"
+          element={
+            <RequireRole role="coach">
+              <TemplateBuilderPage />
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/templates/:templateId/edit"
+          element={
+            <RequireRole role="coach">
+              <TemplateBuilderPage />
             </RequireRole>
           }
         />

@@ -21,8 +21,8 @@ export function CoachDashboard() {
 
   return (
     <div className="stack">
-      <h1>Coach dashboard</h1>
-      <p className="muted">Manage your athletes and schedule their training.</p>
+      <h1>Athletes</h1>
+      <p className="muted">Manage your roster and schedule training. Triage on Today.</p>
 
       <section className="stack">
         <h2>Your athletes</h2>

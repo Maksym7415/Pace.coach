@@ -176,11 +176,12 @@ export async function upsertMySportProfile(
 }
 
 async function listZones(path: string) {
-  const response = await fetch(`${API_BASE}${path}`, { headers: authHeaders() });
-  if (response.status === 404) {
+  const result = await apiGet<{ zones: Zone[]; count: number }>(path);
+  // No sport profile yet → treat as empty zones (not an error for the UI).
+  if (!result.success && result.error === "Sport profile not found") {
     return { success: true as const, zones: [] as Zone[], count: 0 };
   }
-  return response.json() as Promise<ApiEnvelope<{ zones: Zone[]; count: number }>>;
+  return result;
 }
 
 export async function listMyZones(sportId: number) {

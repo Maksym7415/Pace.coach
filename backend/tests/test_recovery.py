@@ -54,3 +54,32 @@ def test_training_create_workout_requires_auth():
         },
     )
     assert response.status_code == 401
+
+
+def test_training_assign_workouts_requires_auth():
+    response = client.post(
+        "/api/training/workouts/assign",
+        json={
+            "athlete_ids": [1],
+            "scheduled_dates": ["2026-06-16"],
+            "sport_id": 1,
+            "title": "Easy run",
+            "steps": [{"type": "run", "duration": 30, "distance": None}],
+        },
+    )
+    assert response.status_code == 401
+
+
+def test_training_templates_require_auth():
+    assert client.get("/api/training/templates").status_code == 401
+    assert (
+        client.post(
+            "/api/training/templates",
+            json={
+                "sport_id": 1,
+                "title": "Easy",
+                "steps": [{"type": "run", "duration": 30, "distance": None}],
+            },
+        ).status_code
+        == 401
+    )

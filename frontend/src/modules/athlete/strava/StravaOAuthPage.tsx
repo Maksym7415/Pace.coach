@@ -39,7 +39,7 @@ export function StravaOAuthPage() {
 
       if (callbackOutcome === "connected" && connected) {
         setPhase("success");
-        timer = window.setTimeout(() => navigate("/athlete", { replace: true }), 2000);
+        timer = window.setTimeout(() => navigate("/today", { replace: true }), 2000);
         return;
       }
 
@@ -70,7 +70,7 @@ export function StravaOAuthPage() {
 
       if (connected) {
         setPhase("success");
-        timer = window.setTimeout(() => navigate("/athlete", { replace: true }), 2000);
+        timer = window.setTimeout(() => navigate("/today", { replace: true }), 2000);
         return;
       }
 
@@ -105,7 +105,7 @@ export function StravaOAuthPage() {
       <div className="card stack">
         <h1>Strava connected</h1>
         <p className="muted">Your Strava account is linked. Redirecting to your dashboard…</p>
-        <button type="button" onClick={() => navigate("/athlete", { replace: true })}>
+        <button type="button" onClick={() => navigate("/today", { replace: true })}>
           Go to dashboard
         </button>
       </div>
@@ -117,7 +117,7 @@ export function StravaOAuthPage() {
       <div className="card stack">
         <h1>Strava still connected</h1>
         <p className="muted">{message}</p>
-        <button type="button" onClick={() => navigate("/athlete", { replace: true })}>
+        <button type="button" onClick={() => navigate("/today", { replace: true })}>
           Go to dashboard
         </button>
       </div>
@@ -128,7 +128,7 @@ export function StravaOAuthPage() {
     <div className="card stack">
       <h1>Strava connection failed</h1>
       <p className="error">{message}</p>
-      <button type="button" onClick={() => navigate("/athlete", { replace: true })}>
+      <button type="button" onClick={() => navigate("/today", { replace: true })}>
         Back to dashboard
       </button>
     </div>

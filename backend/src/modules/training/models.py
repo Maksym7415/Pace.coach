@@ -41,6 +41,8 @@ class Workout(Base):
         SAEnum(WorkoutType, native_enum=False, length=32), nullable=False
     )
     title: Mapped[str] = mapped_column(String(255), nullable=False)
+    purpose: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    target_rpe: Mapped[int | None] = mapped_column(Integer(), nullable=True)
     description: Mapped[str | None] = mapped_column(Text(), nullable=True)
     steps: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     duration_min: Mapped[int | None] = mapped_column(Integer(), nullable=True)
@@ -68,4 +70,34 @@ class Workout(Base):
     athlete = relationship("User", foreign_keys=[athlete_id])
     created_by = relationship("User", foreign_keys=[created_by_id])
     activity = relationship("Activity", foreign_keys=[activity_id])
+    sport = relationship("Sport", foreign_keys=[sport_id])
+
+
+class WorkoutTemplate(Base):
+    __tablename__ = "workout_templates"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    coach_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    sport_id: Mapped[int] = mapped_column(
+        ForeignKey("sports.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    workout_type: Mapped[WorkoutType] = mapped_column(
+        SAEnum(WorkoutType, native_enum=False, length=32), nullable=False
+    )
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    purpose: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    target_rpe: Mapped[int | None] = mapped_column(Integer(), nullable=True)
+    description: Mapped[str | None] = mapped_column(Text(), nullable=True)
+    steps: Mapped[dict] = mapped_column(JSON, nullable=False)
+    duration_min: Mapped[int | None] = mapped_column(Integer(), nullable=True)
+    distance_m: Mapped[int | None] = mapped_column(Integer(), nullable=True)
+
+    created_at: Mapped[datetime | None] = mapped_column(default=datetime.utcnow)
+    updated_at: Mapped[datetime | None] = mapped_column(
+        default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    coach = relationship("User", foreign_keys=[coach_id])
     sport = relationship("Sport", foreign_keys=[sport_id])

@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import { formatActivityMeta } from "../activities/format";
 import type { Workout } from "../training/api";
 import { formatWorkoutPreview } from "./format";
@@ -45,6 +46,13 @@ export function WorkoutDetailModal({ workout, onClose, coachActions }: WorkoutDe
         <p className="muted">
           {workout.scheduled_date} · {meta}
         </p>
+        {(workout.purpose || workout.target_rpe != null) && (
+          <p className="muted">
+            {workout.purpose ? `Purpose: ${workout.purpose}` : null}
+            {workout.purpose && workout.target_rpe != null ? " · " : null}
+            {workout.target_rpe != null ? `RPE ${workout.target_rpe}` : null}
+          </p>
+        )}
         {workout.description && <p>{workout.description}</p>}
 
         <div className="stack">
@@ -66,6 +74,15 @@ export function WorkoutDetailModal({ workout, onClose, coachActions }: WorkoutDe
               <strong>Completed activity:</strong> {workout.linked_activity.name} ·{" "}
               {formatActivityMeta(workout.linked_activity)}
             </p>
+            {(workout.activity_id ?? workout.linked_activity.id) != null && (
+              <Link
+                to={`/activity/${workout.activity_id ?? workout.linked_activity.id}`}
+                className="button-link"
+                onClick={onClose}
+              >
+                Open activity details
+              </Link>
+            )}
           </div>
         )}
 

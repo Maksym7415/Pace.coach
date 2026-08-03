@@ -518,11 +518,11 @@ class ActivityIngestionService:
         return sport_id, activity_type_id
 
     def _build_activity_name(self, meta: ActivityMeta) -> str:
-        if meta.device_name:
-            return meta.device_name
-        if meta.sport:
-            return meta.sport.replace("_", " ").title()
-        return "Imported Activity"
+        label = meta.activity_type or meta.sport
+        base = label.replace("_", " ").title() if label else "Imported Activity"
+        if meta.start_time is None:
+            return base
+        return f"{base} · {meta.start_time.date().isoformat()}"
 
     def _assign_default_gear(
         self,

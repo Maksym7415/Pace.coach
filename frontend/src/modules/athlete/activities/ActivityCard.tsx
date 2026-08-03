@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import type { Activity } from "../../activities/api";
 import { formatActivityMeta } from "../../activities/format";
 
@@ -8,7 +9,11 @@ type ActivityCardProps = {
 
 export function ActivityCard({ activity, compact = false }: ActivityCardProps) {
   return (
-    <article className={`activity-card ${compact ? "activity-card-compact" : ""}`}>
+    <Link
+      to={`/activity/${activity.id}`}
+      className={`activity-card ${compact ? "activity-card-compact" : ""}`}
+      style={{ textDecoration: "none", color: "inherit", display: "block" }}
+    >
       <div className="row-between">
         <strong>{activity.name}</strong>
         <span className={`badge ${activity.source === "strava" ? "badge-ok" : "badge-muted"}`}>
@@ -16,6 +21,6 @@ export function ActivityCard({ activity, compact = false }: ActivityCardProps) {
         </span>
       </div>
       <p className="muted">{formatActivityMeta(activity)}</p>
-    </article>
+    </Link>
   );
 }

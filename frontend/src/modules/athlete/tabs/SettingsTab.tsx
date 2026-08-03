@@ -16,6 +16,9 @@ export function SettingsTab() {
         <Link to="/athlete/profile" className="button-link">
           Open performance profile
         </Link>
+        <Link to="/today" className="button-link">
+          Back to Today
+        </Link>
       </div>
     </div>
   );

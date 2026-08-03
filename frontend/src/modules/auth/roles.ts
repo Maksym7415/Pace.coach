@@ -5,7 +5,6 @@ export function hasRole(user: User | null, role: UserRole): boolean {
 }
 
 export function defaultHomePath(roles: UserRole[]): string {
-  if (roles.includes("athlete")) return "/athlete";
-  if (roles.includes("coach")) return "/coach";
-  return "/athlete";
+  if (roles.includes("athlete") || roles.includes("coach")) return "/today";
+  return "/today";
 }

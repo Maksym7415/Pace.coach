@@ -14,8 +14,10 @@ from src.modules.identity.deps import require_role
 from src.modules.identity.models import User, UserRole, UserRoleEnum
 from src.modules.training.deps import get_training_service
 from src.modules.training.schemas import (
+    WorkoutAssignRequest,
     WorkoutCompleteRequest,
     WorkoutCreateRequest,
+    WorkoutTemplateWriteRequest,
     WorkoutUpdateRequest,
 )
 from src.modules.training.service import TrainingService
@@ -47,6 +49,18 @@ def create_workout(
     return success_json(result, status_code=status)
 
 
+@router.post("/workouts/assign", status_code=201)
+def assign_workouts(
+    body: WorkoutAssignRequest,
+    coach: Annotated[User, Depends(require_role(UserRoleEnum.coach))],
+    service: TrainingService = Depends(get_training_service),
+):
+    result, err, status = service.assign_workouts(coach, body)
+    if err:
+        raise error_json(status, err)
+    return success_json(result, status_code=status)
+
+
 @router.put("/workouts/{workout_id}")
 def update_workout(
     workout_id: int,
@@ -67,6 +81,63 @@ def delete_workout(
     service: TrainingService = Depends(get_training_service),
 ):
     result, err, status = service.delete_workout(coach, workout_id)
+    if err:
+        raise error_json(status, err)
+    return success_json(result)
+
+
+@router.get("/templates")
+def list_templates(
+    coach: Annotated[User, Depends(require_role(UserRoleEnum.coach))],
+    service: TrainingService = Depends(get_training_service),
+):
+    return success_json(service.list_templates(coach))
+
+
+@router.post("/templates", status_code=201)
+def create_template(
+    body: WorkoutTemplateWriteRequest,
+    coach: Annotated[User, Depends(require_role(UserRoleEnum.coach))],
+    service: TrainingService = Depends(get_training_service),
+):
+    result, err, status = service.create_template(coach, body)
+    if err:
+        raise error_json(status, err)
+    return success_json(result, status_code=status)
+
+
+@router.get("/templates/{template_id}")
+def get_template(
+    template_id: int,
+    coach: Annotated[User, Depends(require_role(UserRoleEnum.coach))],
+    service: TrainingService = Depends(get_training_service),
+):
+    result, err, status = service.get_template(coach, template_id)
+    if err:
+        raise error_json(status, err)
+    return success_json(result)
+
+
+@router.put("/templates/{template_id}")
+def update_template(
+    template_id: int,
+    body: WorkoutTemplateWriteRequest,
+    coach: Annotated[User, Depends(require_role(UserRoleEnum.coach))],
+    service: TrainingService = Depends(get_training_service),
+):
+    result, err, status = service.update_template(coach, template_id, body)
+    if err:
+        raise error_json(status, err)
+    return success_json(result)
+
+
+@router.delete("/templates/{template_id}")
+def delete_template(
+    template_id: int,
+    coach: Annotated[User, Depends(require_role(UserRoleEnum.coach))],
+    service: TrainingService = Depends(get_training_service),
+):
+    result, err, status = service.delete_template(coach, template_id)
     if err:
         raise error_json(status, err)
     return success_json(result)

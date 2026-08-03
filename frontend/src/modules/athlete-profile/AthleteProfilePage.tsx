@@ -7,7 +7,7 @@ export function AthleteProfilePage() {
   return (
     <div className="stack">
       <p>
-        <Link to="/athlete">← Back to dashboard</Link>
+        <Link to="/today">← Back to Today</Link>
       </p>
 
       <div>

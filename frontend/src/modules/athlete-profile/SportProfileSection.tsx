@@ -61,28 +61,34 @@ export function SportProfileSection({
 
   async function loadProfile() {
     setLoading(true);
-    const [profileResult, zonesResult] = await Promise.all([
-      getSportProfile(sport.id),
-      fetchZones(sport.id),
-    ]);
+    setError(null);
+    try {
+      const [profileResult, zonesResult] = await Promise.all([
+        getSportProfile(sport.id),
+        fetchZones(sport.id),
+      ]);
 
-    if (profileResult.success && profileResult.profile) {
-      const p = profileResult.profile;
-      setThresholdPace(
-        p.threshold_pace_sec_per_km != null ? secsToMMSS(p.threshold_pace_sec_per_km) : "",
-      );
-      setThresholdHr(p.threshold_hr != null ? String(p.threshold_hr) : "");
-      setFtpWatts(p.ftp_watts != null ? String(p.ftp_watts) : "");
-      setCssPace(
-        p.css_pace_sec_per_100m != null ? secsToMMSS(p.css_pace_sec_per_100m) : "",
-      );
-      setZoneSource(p.zone_source ?? "manual");
-    }
+      if (profileResult.success && profileResult.profile) {
+        const p = profileResult.profile;
+        setThresholdPace(
+          p.threshold_pace_sec_per_km != null ? secsToMMSS(p.threshold_pace_sec_per_km) : "",
+        );
+        setThresholdHr(p.threshold_hr != null ? String(p.threshold_hr) : "");
+        setFtpWatts(p.ftp_watts != null ? String(p.ftp_watts) : "");
+        setCssPace(
+          p.css_pace_sec_per_100m != null ? secsToMMSS(p.css_pace_sec_per_100m) : "",
+        );
+        setZoneSource(p.zone_source ?? "manual");
+      }
 
-    if (zonesResult.success && zonesResult.zones) {
-      setZones(zonesResult.zones);
+      if (zonesResult.success && zonesResult.zones) {
+        setZones(zonesResult.zones);
+      }
+    } catch {
+      setError("Failed to load sport profile");
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }
 
   useEffect(() => {

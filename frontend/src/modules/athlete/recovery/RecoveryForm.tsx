@@ -73,19 +73,101 @@ function buildPayload(form: FormState): RecoveryEntryInput {
   };
 }
 
+/** Energy (1 flat → 10 fresh) maps inversely onto stored fatigue. */
+function fatigueToEnergy(fatigue: number): number {
+  return 11 - fatigue;
+}
+
+function energyToFatigue(energy: number): number {
+  return 11 - energy;
+}
+
+type ScaleField = "fatigue" | "soreness" | "mood" | "sleep_quality";
+
+function ScalePicker({
+  label,
+  hint,
+  value,
+  onChange,
+  invertDisplay,
+}: {
+  label: string;
+  hint: string;
+  value: string;
+  onChange: (next: string) => void;
+  /** When true, UI shows energy (higher = better) while value stores fatigue. */
+  invertDisplay?: boolean;
+}) {
+  const stored = value ? Number.parseInt(value, 10) : null;
+  const selected =
+    stored != null && !Number.isNaN(stored)
+      ? invertDisplay
+        ? fatigueToEnergy(stored)
+        : stored
+      : null;
+
+  return (
+    <div className="flex items-center gap-2">
+      <div className="w-24 shrink-0 text-[11px] text-slate-500">{label}</div>
+      <div className="flex flex-1 gap-1">
+        {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => {
+          const active = selected === n;
+          return (
+            <button
+              key={n}
+              type="button"
+              className={`scale-chip flex-1 ${
+                active ? "scale-chip-active" : ""
+              }`}
+              onClick={() =>
+                onChange(String(invertDisplay ? energyToFatigue(n) : n))
+              }
+            >
+              {n}
+            </button>
+          );
+        })}
+      </div>
+      <div className="w-20 shrink-0 text-right text-[10px] text-slate-400">{hint}</div>
+    </div>
+  );
+}
+
 type RecoveryFormProps = {
   onSaved?: (entry: RecoveryEntry) => void;
+  /** Prefill without a second fetch (Today page already loaded today's entry). */
+  initialEntry?: RecoveryEntry | null;
+  variant?: "default" | "check-in";
+  onCancel?: () => void;
 };
 
-export function RecoveryForm({ onSaved }: RecoveryFormProps) {
-  const [form, setForm] = useState<FormState>(emptyForm);
-  const [readinessScore, setReadinessScore] = useState<number | null>(null);
-  const [loading, setLoading] = useState(true);
+export function RecoveryForm({
+  onSaved,
+  initialEntry,
+  variant = "default",
+  onCancel,
+}: RecoveryFormProps) {
+  const isCheckIn = variant === "check-in";
+  const [form, setForm] = useState<FormState>(() =>
+    initialEntry ? entryToForm(initialEntry) : emptyForm(),
+  );
+  const [readinessScore, setReadinessScore] = useState<number | null>(
+    initialEntry?.readiness_score ?? null,
+  );
+  const [loading, setLoading] = useState(initialEntry === undefined);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [optionalOpen, setOptionalOpen] = useState(false);
 
   useEffect(() => {
+    if (initialEntry !== undefined) {
+      setForm(initialEntry ? entryToForm(initialEntry) : emptyForm());
+      setReadinessScore(initialEntry?.readiness_score ?? null);
+      setLoading(false);
+      return;
+    }
+
     getTodayEntry().then(({ entry, error: loadError }) => {
       if (loadError) setError(loadError);
       if (entry) {
@@ -94,7 +176,7 @@ export function RecoveryForm({ onSaved }: RecoveryFormProps) {
       }
       setLoading(false);
     });
-  }, []);
+  }, [initialEntry]);
 
   function updateField(field: keyof FormState, value: string) {
     setForm((prev) => ({ ...prev, [field]: value }));
@@ -111,16 +193,128 @@ export function RecoveryForm({ onSaved }: RecoveryFormProps) {
     setSaving(false);
 
     if (!result.success || !result.entry) {
-      setError(result.error ?? "Failed to save recovery entry");
+      setError(result.error ?? "Failed to save check-in");
       return;
     }
 
     setReadinessScore(result.entry.readiness_score);
-    setSuccess("Recovery entry saved");
+    setSuccess(isCheckIn ? "Check-in saved" : "Recovery entry saved");
     onSaved?.(result.entry);
   }
 
-  if (loading) return <p className="muted">Loading recovery data…</p>;
+  if (loading) {
+    return <p className="text-sm text-slate-500">{isCheckIn ? "Loading…" : "Loading recovery data…"}</p>;
+  }
+
+  const checkInScales: Array<{
+    field: ScaleField;
+    label: string;
+    hint: string;
+    invertDisplay?: boolean;
+  }> = [
+    { field: "fatigue", label: "Energy", hint: "flat → fresh", invertDisplay: true },
+    { field: "sleep_quality", label: "Sleep quality", hint: "poor → great" },
+    { field: "soreness", label: "Soreness", hint: "none → sore" },
+    { field: "mood", label: "Mood", hint: "low → high" },
+  ];
+
+  if (isCheckIn) {
+    return (
+      <form className="stack recovery-form space-y-3" onSubmit={onSubmit}>
+        <div className="mb-1">
+          <div className="text-sm font-semibold text-slate-900">How are you today?</div>
+          <div className="text-[11px] text-slate-500">Takes ~20s · no wearable required</div>
+        </div>
+
+        <div className="space-y-2">
+          {checkInScales.map((s) => (
+            <ScalePicker
+              key={s.field}
+              label={s.label}
+              hint={s.hint}
+              value={form[s.field]}
+              invertDisplay={s.invertDisplay}
+              onChange={(v) => updateField(s.field, v)}
+            />
+          ))}
+        </div>
+
+        <div className="rounded border border-dashed border-slate-200 p-2">
+          <button
+            type="button"
+            className="mb-1 flex w-full items-center justify-between text-left"
+            onClick={() => setOptionalOpen((v) => !v)}
+          >
+            <span className="text-[11px] uppercase text-slate-400">Optional metrics</span>
+            <span className="text-[11px] text-slate-500">{optionalOpen ? "▴ collapse" : "▾ expand"}</span>
+          </button>
+          {optionalOpen && (
+            <div className="form-grid mt-2">
+              <label>
+                RHR (bpm)
+                <input
+                  type="number"
+                  min={20}
+                  max={220}
+                  value={form.resting_hr_bpm}
+                  onChange={(e) => updateField("resting_hr_bpm", e.target.value)}
+                />
+              </label>
+              <label>
+                HRV (ms)
+                <input
+                  type="number"
+                  min={0}
+                  step={0.1}
+                  value={form.hrv_ms}
+                  onChange={(e) => updateField("hrv_ms", e.target.value)}
+                />
+              </label>
+              <label>
+                Sleep hours
+                <input
+                  type="number"
+                  min={0}
+                  max={24}
+                  step={0.5}
+                  value={form.sleep_hours}
+                  onChange={(e) => updateField("sleep_hours", e.target.value)}
+                />
+              </label>
+              <label>
+                Body battery
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  value={form.body_battery}
+                  onChange={(e) => updateField("body_battery", e.target.value)}
+                />
+              </label>
+              <label className="sm:col-span-2">
+                Notes
+                <input value={form.notes} onChange={(e) => updateField("notes", e.target.value)} />
+              </label>
+            </div>
+          )}
+        </div>
+
+        {error && <p className="error">{error}</p>}
+        {success && <p className="success">{success}</p>}
+
+        <div className="flex flex-wrap items-center gap-2">
+          <button type="submit" disabled={saving}>
+            {saving ? "Saving…" : "Save Today's Check-in"}
+          </button>
+          {onCancel && (
+            <button type="button" className="secondary" onClick={onCancel} disabled={saving}>
+              Cancel
+            </button>
+          )}
+        </div>
+      </form>
+    );
+  }
 
   return (
     <form className="stack recovery-form" onSubmit={onSubmit}>

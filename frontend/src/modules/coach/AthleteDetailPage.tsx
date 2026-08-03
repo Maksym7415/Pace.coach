@@ -5,7 +5,6 @@ import { formatDate } from "../shared/dates";
 import { CoachAthleteProfileSection } from "./CoachAthleteProfileSection";
 import { AthleteTodayRecoverySection } from "./AthleteTodayRecoverySection";
 import { CoachMonthCalendar } from "./calendar/CoachMonthCalendar";
-import { CreateWorkoutForm } from "./CreateWorkoutForm";
 
 export function AthleteDetailPage() {
   const { athleteId } = useParams<{ athleteId: string }>();
@@ -44,7 +43,7 @@ export function AthleteDetailPage() {
   return (
     <div className="stack">
       <p>
-        <Link to="/coach">← Back to athletes</Link>
+        <Link to="/athletes">← Back to athletes</Link>
       </p>
 
       <div className="card stack">
@@ -61,18 +60,22 @@ export function AthleteDetailPage() {
           <span className="badge badge-ok">{detail.upcoming_workouts_count} upcoming</span>{" "}
           <span className="muted">in the next 7 days</span>
         </p>
+        <div>
+          <Link to={`/planning/workout/new?athleteId=${athlete.id}`}>
+            <button type="button">Schedule workout</button>
+          </Link>
+        </div>
       </div>
 
       <AthleteTodayRecoverySection athleteId={athlete.id} />
 
       <CoachAthleteProfileSection athleteId={athlete.id} />
 
-      <CreateWorkoutForm
+      <CoachMonthCalendar
         athleteId={athlete.id}
-        onCreated={() => setCalendarRefreshKey((k) => k + 1)}
+        refreshKey={calendarRefreshKey}
+        onCalendarChanged={() => setCalendarRefreshKey((k) => k + 1)}
       />
-
-      <CoachMonthCalendar athleteId={athlete.id} refreshKey={calendarRefreshKey} />
     </div>
   );
 }

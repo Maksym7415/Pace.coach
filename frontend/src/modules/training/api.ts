@@ -25,7 +25,12 @@ export const WORKOUT_TYPES: { value: WorkoutType; label: string }[] = [
   { value: "rest", label: "Rest" },
 ];
 
-export type WorkoutWriteInput = {
+export type WorkoutIntentFields = {
+  purpose?: string | null;
+  target_rpe?: number | null;
+};
+
+export type WorkoutWriteInput = WorkoutIntentFields & {
   scheduled_date: string;
   sport_id: number;
   workout_type?: WorkoutType;
@@ -40,6 +45,24 @@ export type WorkoutCreateInput = WorkoutWriteInput & {
 
 export type WorkoutUpdateInput = WorkoutWriteInput;
 
+export type WorkoutAssignInput = WorkoutIntentFields & {
+  athlete_ids: number[];
+  scheduled_dates: string[];
+  sport_id: number;
+  workout_type?: WorkoutType;
+  title: string;
+  description?: string | null;
+  steps: WorkoutStepItem[];
+};
+
+export type WorkoutTemplateWriteInput = WorkoutIntentFields & {
+  sport_id: number;
+  workout_type?: WorkoutType;
+  title: string;
+  description?: string | null;
+  steps: WorkoutStepItem[];
+};
+
 export type Workout = {
   id: number;
   athlete_id: number;
@@ -50,6 +73,8 @@ export type Workout = {
   sport_name: string | null;
   workout_type: WorkoutType;
   title: string;
+  purpose: string | null;
+  target_rpe: number | null;
   description: string | null;
   steps: WorkoutStepItem[] | null;
   duration_min: number | null;
@@ -59,6 +84,24 @@ export type Workout = {
   notes: string | null;
   activity_id: number | null;
   linked_activity: ActivitySummary | null;
+  created_at: string | null;
+  updated_at: string | null;
+};
+
+export type WorkoutTemplate = {
+  id: number;
+  coach_id: number;
+  sport_id: number;
+  sport_code: string | null;
+  sport_name: string | null;
+  workout_type: WorkoutType;
+  title: string;
+  purpose: string | null;
+  target_rpe: number | null;
+  description: string | null;
+  steps: WorkoutStepItem[];
+  duration_min: number | null;
+  distance_m: number | null;
   created_at: string | null;
   updated_at: string | null;
 };
@@ -77,6 +120,10 @@ export async function getAthleteCalendar(athleteId: number, startDate: string, e
 
 export async function createWorkout(input: WorkoutCreateInput) {
   return apiPost<{ workout: Workout }>("/api/training/workouts", input);
+}
+
+export async function assignWorkouts(input: WorkoutAssignInput) {
+  return apiPost<{ workouts: Workout[]; count: number }>("/api/training/workouts/assign", input);
 }
 
 export async function updateWorkout(workoutId: number, input: WorkoutUpdateInput) {
@@ -99,4 +146,26 @@ export async function completeWorkout(workoutId: number, notes?: string) {
 
 export async function skipWorkout(workoutId: number) {
   return apiPut<{ workout: Workout }>(`/api/training/workouts/${workoutId}/skip`);
+}
+
+export async function listWorkoutTemplates() {
+  return apiGet<{ templates: WorkoutTemplate[]; count: number }>("/api/training/templates");
+}
+
+export async function getWorkoutTemplate(templateId: number) {
+  return apiGet<{ template: WorkoutTemplate }>(`/api/training/templates/${templateId}`);
+}
+
+export async function createWorkoutTemplate(input: WorkoutTemplateWriteInput) {
+  return apiPost<{ template: WorkoutTemplate }>("/api/training/templates", input);
+}
+
+export async function updateWorkoutTemplate(templateId: number, input: WorkoutTemplateWriteInput) {
+  return apiPut<{ template: WorkoutTemplate }>(`/api/training/templates/${templateId}`, input);
+}
+
+export async function deleteWorkoutTemplate(templateId: number) {
+  return apiDelete<{ deleted: boolean; template_id: number }>(
+    `/api/training/templates/${templateId}`,
+  );
 }
