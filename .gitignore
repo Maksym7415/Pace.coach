@@ -11,3 +11,4 @@ frontend/dist/
 backend/.pytest_cache/
 backend/storage/
 .DS_Store
+*/tmp

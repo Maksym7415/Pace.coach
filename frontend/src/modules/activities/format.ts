@@ -1,5 +1,5 @@
 import type { Activity } from "./api";
-import { formatDate } from "../shared/dates";
+import { formatDate, toDateKey } from "../shared/dates";
 
 export function formatDistance(km: number | null | undefined): string {
   if (km === null || km === undefined) return "—";
@@ -9,6 +9,17 @@ export function formatDistance(km: number | null | undefined): string {
 export function formatDuration(hours: number | null | undefined): string {
   if (hours === null || hours === undefined) return "—";
   return `${hours.toFixed(1)} h`;
+}
+
+/** Compact duration for list rows, e.g. `1h 32m` or `45m`. */
+export function formatDurationCompact(hours: number | null | undefined): string | null {
+  if (hours === null || hours === undefined) return null;
+  const totalMinutes = Math.round(hours * 60);
+  const h = Math.floor(totalMinutes / 60);
+  const m = totalMinutes % 60;
+  if (h <= 0) return `${m}m`;
+  if (m === 0) return `${h}h`;
+  return `${h}h ${m}m`;
 }
 
 type ActivityLike = {
@@ -37,4 +48,15 @@ export function formatActivityListRow(activity: Activity): string {
     formatDuration(activity.total_hours),
     activityTypeLabel(activity),
   ].join(" · ");
+}
+
+/** List meta like `Wed · 1h 32m · 11.4 km`. */
+export function formatActivityListMeta(activity: Activity): string {
+  const [y, m, d] = toDateKey(activity.date).split("-").map(Number);
+  const weekday = new Date(y, m - 1, d).toLocaleDateString(undefined, { weekday: "short" });
+  const parts = [weekday];
+  const duration = formatDurationCompact(activity.total_hours);
+  if (duration) parts.push(duration);
+  if (activity.total_distance_km != null) parts.push(formatDistance(activity.total_distance_km));
+  return parts.join(" · ");
 }

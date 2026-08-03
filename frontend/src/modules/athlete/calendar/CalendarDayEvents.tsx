@@ -34,10 +34,12 @@ export function CalendarDayEvents({
   workouts,
   activities,
   onWorkoutClick,
+  onActivityClick,
 }: {
   workouts: { id: number; title: string; status: string }[];
   activities: { id: number; name: string }[];
   onWorkoutClick?: (workoutId: number) => void;
+  onActivityClick?: (activityId: number) => void;
 }) {
   const events: { key: string; label: string; className: string; onClick?: () => void }[] = [
     ...workouts.map((w) => ({
@@ -53,7 +55,7 @@ export function CalendarDayEvents({
       key: `a-${a.id}`,
       label: a.name,
       className: "chip-activity",
-      onClick: undefined,
+      onClick: onActivityClick ? () => onActivityClick(a.id) : undefined,
     })),
   ];
 

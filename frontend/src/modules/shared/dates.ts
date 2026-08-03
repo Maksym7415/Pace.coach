@@ -53,3 +53,27 @@ export function formatDate(iso: string): string {
 export function formatMonthYear(year: number, month: number): string {
   return new Date(year, month, 1).toLocaleDateString(undefined, { month: "long", year: "numeric" });
 }
+
+export type ActivityListRangeId = "7d" | "30d" | "week" | "month" | "year";
+
+/** Inclusive date window for Activities list range chips (year capped to Jan 1…today). */
+export function activityListRangeBounds(
+  rangeId: ActivityListRangeId,
+  today: string = todayIso(),
+): { start: string; end: string } {
+  const [y, m] = toDateKey(today).split("-").map(Number);
+  switch (rangeId) {
+    case "7d":
+      return { start: addDaysIso(today, -6), end: today };
+    case "30d":
+      return { start: addDaysIso(today, -29), end: today };
+    case "week": {
+      const w = weekBounds(today);
+      return { start: w.start, end: w.end };
+    }
+    case "month":
+      return monthBounds(y, m - 1);
+    case "year":
+      return { start: toIsoDate(y, 0, 1), end: today };
+  }
+}
