@@ -10,7 +10,15 @@ import fitparse
 from fitparse.utils import FitCRCError, FitEOFError, FitHeaderError, FitParseError
 
 from .errors import CorruptedFitFileError, InvalidFitFileError, UnsupportedFormatError
-from .models import ActivityMeta, Lap, NormalizedActivity, TrackPoint
+from .models import (
+    ActivityMeta,
+    DeviceWorkout,
+    DeviceWorkoutStep,
+    FitEvent,
+    Lap,
+    NormalizedActivity,
+    TrackPoint,
+)
 from .sport_mapping import map_sport
 
 SEMICIRCLE_TO_DEGREES = 180.0 / (2**31)
@@ -127,15 +135,39 @@ def _end_time(start_time: datetime | None, duration_seconds: float | None) -> da
     return start_time + timedelta(seconds=duration_seconds)
 
 
+def _enum_name(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value
+    name = getattr(value, "name", None)
+    if name is not None:
+        return str(name)
+    return str(value)
+
+
+def _message_index(message: fitparse.records.FitMessage) -> int | None:
+    raw = _first_value(message, "message_index")
+    if raw is None:
+        return None
+    if isinstance(raw, dict):
+        value = raw.get("value", raw.get("name"))
+        return _to_int(value)
+    return _to_int(raw)
+
+
 def _parse_laps(lap_messages: list[fitparse.records.FitMessage]) -> list[Lap]:
     laps: list[Lap] = []
     for index, message in enumerate(lap_messages, start=1):
         avg_speed_ms = _first_value(message, "enhanced_avg_speed", "avg_speed")
         avg_speed_kmh = _speed_ms_to_kmh(_to_float(avg_speed_ms))
+        elapsed = _to_float(_first_value(message, "total_elapsed_time"))
+        timer = _to_float(_first_value(message, "total_timer_time"))
         laps.append(
             Lap(
                 lap_number=index,
-                duration=_to_float(_first_value(message, "total_elapsed_time", "total_timer_time")),
+                duration=elapsed if elapsed is not None else timer,
+                timer_time=timer,
                 distance=_to_float(_first_value(message, "total_distance")),
                 avg_hr=_to_int(_first_value(message, "avg_heart_rate")),
                 max_hr=_to_int(_first_value(message, "max_heart_rate")),
@@ -146,9 +178,86 @@ def _parse_laps(lap_messages: list[fitparse.records.FitMessage]) -> list[Lap]:
                 max_motor_power=_to_int(_first_value(message, "max_lev_motor_power")),
                 avg_speed=avg_speed_kmh,
                 avg_pace=_pace_from_speed_kmh(avg_speed_kmh),
+                start_time=_first_value(message, "start_time"),
+                message_index=_message_index(message),
+                wkt_step_index=_to_int(
+                    _first_value(message, "wkt_step_index", "workout_step_index")
+                ),
+                lap_trigger=_enum_name(_first_value(message, "lap_trigger")),
+                intensity=_enum_name(_first_value(message, "intensity")),
             )
         )
     return laps
+
+
+def _parse_device_workout_steps(
+    step_messages: list[fitparse.records.FitMessage],
+) -> list[DeviceWorkoutStep]:
+    steps: list[DeviceWorkoutStep] = []
+    for message in step_messages:
+        steps.append(
+            DeviceWorkoutStep(
+                message_index=_message_index(message),
+                duration_type=_enum_name(_first_value(message, "duration_type")),
+                duration_value=_to_float(_first_value(message, "duration_value")),
+                duration_distance=_to_float(_first_value(message, "duration_distance")),
+                duration_time=_to_float(_first_value(message, "duration_time")),
+                duration_step=_to_int(_first_value(message, "duration_step")),
+                repeat_steps=_to_int(_first_value(message, "repeat_steps")),
+                target_type=_enum_name(_first_value(message, "target_type")),
+                target_value=_to_float(_first_value(message, "target_value")),
+                custom_target_value_low=_to_float(
+                    _first_value(message, "custom_target_value_low")
+                ),
+                custom_target_value_high=_to_float(
+                    _first_value(message, "custom_target_value_high")
+                ),
+                custom_target_speed_low=_to_float(
+                    _first_value(message, "custom_target_speed_low")
+                ),
+                custom_target_speed_high=_to_float(
+                    _first_value(message, "custom_target_speed_high")
+                ),
+                intensity=_enum_name(_first_value(message, "intensity")),
+                notes=_first_value(message, "notes"),
+                wkt_step_name=_first_value(message, "wkt_step_name"),
+            )
+        )
+    return steps
+
+
+def _parse_device_workout(
+    workout_messages: list[fitparse.records.FitMessage],
+    step_messages: list[fitparse.records.FitMessage],
+) -> DeviceWorkout | None:
+    if not workout_messages and not step_messages:
+        return None
+
+    workout_msg = workout_messages[0] if workout_messages else None
+    return DeviceWorkout(
+        wkt_name=_first_value(workout_msg, "wkt_name") if workout_msg else None,
+        sport=_enum_name(_first_value(workout_msg, "sport")) if workout_msg else None,
+        sub_sport=_enum_name(_first_value(workout_msg, "sub_sport")) if workout_msg else None,
+        num_valid_steps=_to_int(_first_value(workout_msg, "num_valid_steps"))
+        if workout_msg
+        else None,
+        steps=_parse_device_workout_steps(step_messages),
+    )
+
+
+def _parse_events(event_messages: list[fitparse.records.FitMessage]) -> list[FitEvent]:
+    events: list[FitEvent] = []
+    for message in event_messages:
+        events.append(
+            FitEvent(
+                timestamp=_first_value(message, "timestamp"),
+                event=_enum_name(_first_value(message, "event")),
+                event_type=_enum_name(_first_value(message, "event_type")),
+                data=_first_value(message, "data"),
+                event_group=_to_int(_first_value(message, "event_group")),
+            )
+        )
+    return events
 
 
 def _parse_track_points(record_messages: list[fitparse.records.FitMessage]) -> list[TrackPoint]:
@@ -249,6 +358,9 @@ class FitParser:
             session_messages = list(fit_file.get_messages("session"))
             lap_messages = list(fit_file.get_messages("lap"))
             record_messages = list(fit_file.get_messages("record"))
+            workout_messages = list(fit_file.get_messages("workout"))
+            workout_step_messages = list(fit_file.get_messages("workout_step"))
+            event_messages = list(fit_file.get_messages("event"))
         except (FitEOFError, FitCRCError, FitParseError) as exc:
             raise CorruptedFitFileError(str(exc)) from exc
 
@@ -267,4 +379,6 @@ class FitParser:
             laps=_parse_laps(lap_messages),
             track_points=_parse_track_points(record_messages),
             developer_fields=_collect_developer_fields(fit_file),
+            device_workout=_parse_device_workout(workout_messages, workout_step_messages),
+            events=_parse_events(event_messages),
         )

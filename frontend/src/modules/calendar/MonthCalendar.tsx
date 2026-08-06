@@ -10,6 +10,7 @@ import {
   activityMatchesSportFilter,
   type SportFilterId,
 } from "../activities/sportFilter";
+import { useAuth } from "../auth/AuthContext";
 import { ActivityCard } from "../athlete/activities/ActivityCard";
 import { CalendarDayEvents } from "../athlete/calendar/CalendarDayEvents";
 import { WorkoutCard } from "../athlete/calendar/WorkoutCard";
@@ -21,6 +22,11 @@ import {
   type Workout,
 } from "../training/api";
 import { WorkoutDetailModal } from "../workout/WorkoutDetailModal";
+import {
+  CalendarEventPopup,
+  type CalendarPopupItem,
+} from "./CalendarEventPopup";
+import { STATUS_LEGEND } from "./eventStatus";
 import { buildMonthGrid, groupByDate, unlinkedActivitiesForDay } from "./monthGrid";
 
 const MONTH_ABBREV = [
@@ -58,6 +64,7 @@ export function MonthCalendar({
   coachPlanning,
 }: MonthCalendarProps) {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth());
@@ -67,16 +74,19 @@ export function MonthCalendar({
   const [error, setError] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [selectedWorkout, setSelectedWorkout] = useState<Workout | null>(null);
+  const [popupItem, setPopupItem] = useState<CalendarPopupItem | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerYear, setPickerYear] = useState(now.getFullYear());
+  const [localRefreshKey, setLocalRefreshKey] = useState(0);
   const pickerRef = useRef<HTMLDivElement>(null);
 
-  const athleteId = scope.type === "athlete" ? scope.athleteId : null;
-  const refreshKey = coachPlanning?.refreshKey ?? 0;
+  const scopeAthleteId = scope.type === "athlete" ? scope.athleteId : null;
+  const uploadAthleteId = scopeAthleteId ?? user?.id ?? 0;
+  const refreshKey = (coachPlanning?.refreshKey ?? 0) + localRefreshKey;
   const coachingEnabled = coachPlanning?.enabled === true;
   const today = todayIso();
-  /** Coach planning keeps day select + panel; activities-only opens chips directly. */
-  const daySelectEnabled = showWorkouts;
+  /** Day select panel is coach-only; athlete uses chip → popup. */
+  const daySelectEnabled = coachingEnabled;
 
   useEffect(() => {
     if (!pickerOpen) return;
@@ -152,14 +162,22 @@ export function MonthCalendar({
     return () => {
       cancelled = true;
     };
-  }, [scope.type, athleteId, year, month, refreshKey, showWorkouts, showActivities]);
+  }, [scope.type, scopeAthleteId, year, month, refreshKey, showWorkouts, showActivities]);
 
   const filteredActivities = useMemo(
     () => activities.filter((a) => activityMatchesSportFilter(a, sportFilter)),
     [activities, sportFilter],
   );
 
-  const workoutsByDate = useMemo(() => groupByDate(workouts, "scheduled_date"), [workouts]);
+  const filteredWorkouts = useMemo(
+    () => workouts.filter((w) => activityMatchesSportFilter({ sport_code: w.sport_code }, sportFilter)),
+    [workouts, sportFilter],
+  );
+
+  const workoutsByDate = useMemo(
+    () => groupByDate(filteredWorkouts, "scheduled_date"),
+    [filteredWorkouts],
+  );
   const activitiesByDate = useMemo(
     () => groupByDate(filteredActivities, "date"),
     [filteredActivities],
@@ -176,7 +194,8 @@ export function MonthCalendar({
       : selectedDayActivities;
 
   const hasAnyEvents =
-    (showWorkouts && workouts.length > 0) || (showActivities && filteredActivities.length > 0);
+    (showWorkouts && filteredWorkouts.length > 0) ||
+    (showActivities && filteredActivities.length > 0);
 
   function prevMonth() {
     if (month === 0) {
@@ -303,6 +322,15 @@ export function MonthCalendar({
         </button>
       </div>
 
+      <div className="calendar-status-legend">
+        {STATUS_LEGEND.map((item) => (
+          <span key={item.id} className="calendar-status-legend-item">
+            <span className={`calendar-status-dot ${item.dotClass}`} />
+            {item.label}
+          </span>
+        ))}
+      </div>
+
       {loading && <p className="muted">Loading calendar…</p>}
       {error && <p className="error">{error}</p>}
 
@@ -332,15 +360,15 @@ export function MonthCalendar({
             <CalendarDayEvents
               workouts={dayWorkouts}
               activities={dayActivities}
-              onWorkoutClick={
-                showWorkouts
-                  ? (id) => {
-                      const workout = dayWorkouts.find((w) => w.id === id);
-                      if (workout) setSelectedWorkout(workout);
-                    }
-                  : undefined
-              }
-              onActivityClick={(id) => navigate(`/activity/${id}`)}
+              today={today}
+              onWorkoutClick={(id) => {
+                const workout = dayWorkouts.find((w) => w.id === id);
+                if (workout) setPopupItem({ kind: "workout", workout });
+              }}
+              onActivityClick={(id) => {
+                const activity = dayActivities.find((a) => a.id === id);
+                if (activity) setPopupItem({ kind: "activity", activity });
+              }}
             />
           ) : null;
 
@@ -386,8 +414,8 @@ export function MonthCalendar({
         <div className="card stack">
           <div className="row-between">
             <h4>{selectedDate}</h4>
-            {coachingEnabled && athleteId != null && (
-              <Link to={`/planning/workout/new?athleteId=${athleteId}&date=${selectedDate}`}>
+            {coachingEnabled && scopeAthleteId != null && (
+              <Link to={`/planning/workout/new?athleteId=${scopeAthleteId}&date=${selectedDate}`}>
                 <button type="button" className="secondary">
                   Schedule workout
                 </button>
@@ -419,6 +447,23 @@ export function MonthCalendar({
             <p className="muted">Nothing scheduled or completed on this day.</p>
           )}
         </div>
+      )}
+
+      {popupItem && uploadAthleteId > 0 && (
+        <CalendarEventPopup
+          item={popupItem}
+          athleteId={uploadAthleteId}
+          today={today}
+          onClose={() => setPopupItem(null)}
+          onOpenWorkout={(workout) => {
+            setPopupItem(null);
+            setSelectedWorkout(workout);
+          }}
+          onUploaded={() => {
+            setLocalRefreshKey((k) => k + 1);
+            coachPlanning?.onCalendarChanged?.();
+          }}
+        />
       )}
 
       {selectedWorkout && (

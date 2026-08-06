@@ -72,12 +72,18 @@ class ActivityLap(Base):
     )
     lap_number: Mapped[int] = mapped_column(Integer, nullable=False)
     duration: Mapped[float | None] = mapped_column(Float, nullable=True)
+    timer_time: Mapped[float | None] = mapped_column(Float, nullable=True)
     distance: Mapped[float | None] = mapped_column(Float, nullable=True)
     avg_hr: Mapped[int | None] = mapped_column(Integer, nullable=True)
     max_hr: Mapped[int | None] = mapped_column(Integer, nullable=True)
     avg_power: Mapped[int | None] = mapped_column(Integer, nullable=True)
     avg_speed: Mapped[float | None] = mapped_column(Float, nullable=True)
     avg_pace: Mapped[float | None] = mapped_column(Float, nullable=True)
+    start_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    message_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    wkt_step_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    lap_trigger: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    intensity: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
     activity = relationship("Activity", back_populates="activity_laps")
 

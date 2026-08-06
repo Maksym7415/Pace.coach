@@ -27,7 +27,13 @@ from src.modules.activity_import.models import (  # noqa: F401
 from src.modules.coaching.models import CoachAthleteRelation  # noqa: F401
 from src.modules.identity.models import User, UserRole  # noqa: F401
 from src.modules.recovery.models import RecoveryEntry  # noqa: F401
-from src.modules.training.models import Workout  # noqa: F401
+from src.modules.training.models import Workout, WorkoutTemplate  # noqa: F401
 from src.modules.third_party.strava.models import UserStrava  # noqa: F401
+from src.modules.execution.models import (  # noqa: F401
+    ExecutionIssue,
+    WorkoutExecution,
+    WorkoutPlanSnapshot,
+    WorkoutStepExecution,
+)
 
 __all__ = ["Base"]

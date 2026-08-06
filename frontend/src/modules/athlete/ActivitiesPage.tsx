@@ -122,7 +122,7 @@ export function ActivitiesPage() {
       {view === "calendar" ? (
         <MonthCalendar
           scope={{ type: "self" }}
-          showWorkouts={false}
+          showWorkouts
           showActivities
           sportFilter={sportFilter}
         />

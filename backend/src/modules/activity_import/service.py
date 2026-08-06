@@ -425,12 +425,18 @@ class ActivityIngestionService:
                     activity_id=activity.id,
                     lap_number=lap.lap_number,
                     duration=lap.duration,
+                    timer_time=lap.timer_time,
                     distance=lap.distance,
                     avg_hr=lap.avg_hr,
                     max_hr=lap.max_hr,
                     avg_power=lap.avg_power,
                     avg_speed=lap.avg_speed,
                     avg_pace=lap.avg_pace,
+                    start_time=lap.start_time,
+                    message_index=lap.message_index,
+                    wkt_step_index=lap.wkt_step_index,
+                    lap_trigger=lap.lap_trigger,
+                    intensity=lap.intensity,
                 )
             )
 
@@ -458,15 +464,25 @@ class ActivityIngestionService:
                 )
             )
 
+        raw_metadata: dict = {
+            "device_name": meta.device_name,
+            "developer_fields": normalized.developer_fields,
+        }
+        if normalized.device_workout is not None:
+            raw_metadata["device_workout"] = normalized.device_workout.model_dump(
+                mode="json"
+            )
+        if normalized.events:
+            raw_metadata["events"] = [
+                event.model_dump(mode="json") for event in normalized.events
+            ]
+
         db.add(
             ActivitySource(
                 activity_id=activity.id,
                 provider=ImportSource.FIT_UPLOAD.value,
                 external_id=activity_import.stored_file.checksum if activity_import.stored_file else None,
-                raw_metadata={
-                    "device_name": meta.device_name,
-                    "developer_fields": normalized.developer_fields,
-                },
+                raw_metadata=raw_metadata,
             )
         )
 
@@ -480,13 +496,29 @@ class ActivityIngestionService:
                 total_distance_km=total_distance_km,
                 total_hours=total_hours,
             )
-            try_link_activity_to_workout(
+            linked = try_link_activity_to_workout(
                 db,
                 activity_import.athlete_id,
                 activity.id,
                 activity.date,
                 sport.code,
             )
+            if linked is not None and linked.steps:
+                try:
+                    from src.modules.execution.service import ExecutionMatchingService
+
+                    ExecutionMatchingService(db).match_from_normalized(
+                        workout_id=linked.id,
+                        activity_id=activity.id,
+                        normalized=normalized,
+                        vendor="garmin",
+                    )
+                except Exception:
+                    logger.exception(
+                        "Execution matching failed for workout %s activity %s",
+                        linked.id,
+                        activity.id,
+                    )
 
         return activity
 

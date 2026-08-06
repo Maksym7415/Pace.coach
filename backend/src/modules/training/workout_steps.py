@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import enum
+import uuid
 from typing import Annotated, Any, Union
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -76,6 +77,8 @@ def _infer_duration_type(step: "WorkoutStepModel") -> DurationType:
 class WorkoutStepModel(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
+    id: str | None = None
+    template_step_id: str | None = Field(None, alias="templateStepId")
     type: StepType
     duration_type: DurationType | None = Field(None, alias="durationType")
     duration: int | None = Field(None, ge=1)
@@ -111,6 +114,7 @@ class WorkoutStepModel(BaseModel):
 class RepeatBlockModel(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
+    id: str | None = None
     repeat_count: int = Field(..., alias="repeatCount", ge=1)
     steps: list[WorkoutStepModel] = Field(..., min_length=1)
 
@@ -138,6 +142,40 @@ def parse_step_item(raw: dict[str, Any]) -> WorkoutStepModel | RepeatBlockModel:
     return WorkoutStepModel.model_validate(raw)
 
 
+def ensure_step_ids(items: list[Any]) -> list[dict[str, Any]]:
+    """Mint stable UUIDs for any step (or repeat block) missing an id."""
+    result: list[dict[str, Any]] = []
+    for raw in items:
+        if isinstance(raw, (WorkoutStepModel, RepeatBlockModel)):
+            item = raw
+        elif isinstance(raw, dict):
+            item = parse_step_item(raw)
+        else:
+            raise ValueError("Invalid step item")
+
+        if isinstance(item, RepeatBlockModel):
+            block_id = item.id or str(uuid.uuid4())
+            child_steps = []
+            for step in item.steps:
+                step_id = step.id or str(uuid.uuid4())
+                dumped = step.model_dump(by_alias=True, exclude_none=False)
+                dumped["id"] = step_id
+                child_steps.append(dumped)
+            result.append(
+                {
+                    "id": block_id,
+                    "repeatCount": item.repeat_count,
+                    "steps": child_steps,
+                }
+            )
+        else:
+            step_id = item.id or str(uuid.uuid4())
+            dumped = item.model_dump(by_alias=True, exclude_none=False)
+            dumped["id"] = step_id
+            result.append(dumped)
+    return result
+
+
 def validate_steps(sport_code: str, items: list[Any]) -> list[dict[str, Any]]:
     if sport_code not in BUILDER_SPORT_CODES:
         raise ValueError(
@@ -160,14 +198,19 @@ def validate_steps(sport_code: str, items: list[Any]) -> list[dict[str, Any]]:
         if isinstance(item, RepeatBlockModel):
             for step in item.steps:
                 if step.type not in allowed:
-                    raise ValueError(f"Step type '{step.type.value}' is not allowed for {sport_code}")
+                    raise ValueError(
+                        f"Step type '{step.type.value}' is not allowed for {sport_code}"
+                    )
             parsed.append(item)
         else:
             if item.type not in allowed:
-                raise ValueError(f"Step type '{item.type.value}' is not allowed for {sport_code}")
+                raise ValueError(
+                    f"Step type '{item.type.value}' is not allowed for {sport_code}"
+                )
             parsed.append(item)
 
-    return [p.model_dump(by_alias=True, exclude_none=False) for p in parsed]
+    dumped = [p.model_dump(by_alias=True, exclude_none=False) for p in parsed]
+    return ensure_step_ids(dumped)
 
 
 def _rollup_leaf(step: WorkoutStepModel) -> tuple[int, int]:

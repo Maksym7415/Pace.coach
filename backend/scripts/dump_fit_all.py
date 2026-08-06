@@ -150,6 +150,10 @@ def dump_fit(path: Path) -> dict[str, Any]:
     ]
 
     lap_triggers = Counter(str(lap["flat"].get("lap_trigger")) for lap in laps)
+    wkt_step_indexes = [
+        lap["flat"].get("wkt_step_index", lap["flat"].get("workout_step_index"))
+        for lap in laps
+    ]
 
     research_hints = {
         "has_workout_definition": len(workouts) > 0,
@@ -158,20 +162,26 @@ def dump_fit(path: Path) -> dict[str, Any]:
         "workout_related_event_count": len(workout_related_events),
         "lap_count": len(laps),
         "lap_trigger_value_counts": dict(lap_triggers),
+        "wkt_step_index_sequence": wkt_step_indexes,
+        "laps_with_wkt_step_index": sum(1 for v in wkt_step_indexes if v is not None),
         "questions": {
             "stores_workout_step_transitions": (
                 "LIKELY YES if event.event == workout_step (or workout) appears with timestamps; "
                 "definition-only if only workout/workout_step exist without matching events"
             ),
             "step_boundaries_from_fit": (
-                "Use Event(workout_step) timestamps + data/workout_step_index/message_index; "
-                "fallback is lap boundaries only if device maps steps to laps"
+                "Use lap.wkt_step_index (Garmin FIT field name; not workout_step_index). "
+                "Index identifies authored step, not occurrence — repeats cycle the same index. "
+                "Fallback is Event(workout_step) timestamps if present."
             ),
             "auto_vs_manual_laps": (
-                "Check lap.lap_trigger: 'manual' vs time/distance/session_end/etc."
+                "lap_trigger alone cannot separate Auto Lap from workout step boundaries when "
+                "duration_type is distance/time (trigger reports why the lap closed). "
+                "Prefer wkt_step_index continuity."
             ),
             "native_execution_data_available": (
-                "Strong if workout_step Events exist; weak if only prescribed WorkoutStep msgs"
+                "Strong if wkt_step_index is present on laps; weaker if only prescribed "
+                "WorkoutStep msgs; Event(workout_step) is rare on modern Garmin devices"
             ),
         },
     }

@@ -6,12 +6,15 @@ from .errors import (
     InvalidFitFileError,
     UnsupportedFormatError,
 )
-from .models import ActivityMeta, Lap, NormalizedActivity, TrackPoint
+from .models import ActivityMeta, DeviceWorkout, DeviceWorkoutStep, FitEvent, Lap, NormalizedActivity, TrackPoint
 from .parser import FitParser
 
 __all__ = [
     "ActivityMeta",
     "CorruptedFitFileError",
+    "DeviceWorkout",
+    "DeviceWorkoutStep",
+    "FitEvent",
     "FitParser",
     "FitParserError",
     "InvalidFitFileError",

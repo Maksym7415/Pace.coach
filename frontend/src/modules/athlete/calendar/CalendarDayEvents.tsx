@@ -1,18 +1,29 @@
+import type { Activity } from "../../activities/api";
+import type { Workout } from "../../training/api";
+import {
+  chipClassForStatus,
+  displayStatusForActivity,
+  displayStatusForWorkout,
+  STATUS_BADGE_LABEL,
+  type CalendarDisplayStatus,
+} from "../../calendar/eventStatus";
+
 const MAX_VISIBLE_EVENTS = 3;
 
 type CalendarEventChipProps = {
   label: string;
   className: string;
+  title?: string;
   onClick?: () => void;
 };
 
-export function CalendarEventChip({ label, className, onClick }: CalendarEventChipProps) {
+export function CalendarEventChip({ label, className, title, onClick }: CalendarEventChipProps) {
   if (onClick) {
     return (
       <button
         type="button"
         className={`calendar-event-chip ${className}`}
-        title={label}
+        title={title ?? label}
         onClick={(e) => {
           e.stopPropagation();
           onClick();
@@ -24,7 +35,7 @@ export function CalendarEventChip({ label, className, onClick }: CalendarEventCh
   }
 
   return (
-    <span className={`calendar-event-chip ${className}`} title={label}>
+    <span className={`calendar-event-chip ${className}`} title={title ?? label}>
       {label}
     </span>
   );
@@ -33,30 +44,43 @@ export function CalendarEventChip({ label, className, onClick }: CalendarEventCh
 export function CalendarDayEvents({
   workouts,
   activities,
+  today,
   onWorkoutClick,
   onActivityClick,
 }: {
-  workouts: { id: number; title: string; status: string }[];
-  activities: { id: number; name: string }[];
+  workouts: Workout[];
+  activities: Activity[];
+  today: string;
   onWorkoutClick?: (workoutId: number) => void;
   onActivityClick?: (activityId: number) => void;
 }) {
-  const events: { key: string; label: string; className: string; onClick?: () => void }[] = [
-    ...workouts.map((w) => ({
-      key: `w-${w.id}`,
-      label: w.title,
-      className: `chip-workout status-${w.status}`,
-      onClick:
-        onWorkoutClick && w.status !== "completed"
-          ? () => onWorkoutClick(w.id)
-          : undefined,
-    })),
-    ...activities.map((a) => ({
-      key: `a-${a.id}`,
-      label: a.name,
-      className: "chip-activity",
-      onClick: onActivityClick ? () => onActivityClick(a.id) : undefined,
-    })),
+  const events: {
+    key: string;
+    label: string;
+    className: string;
+    title: string;
+    onClick?: () => void;
+  }[] = [
+    ...workouts.map((w) => {
+      const status: CalendarDisplayStatus = displayStatusForWorkout(w, today);
+      return {
+        key: `w-${w.id}`,
+        label: w.title,
+        className: chipClassForStatus(status),
+        title: `${w.title} · ${STATUS_BADGE_LABEL[status]}`,
+        onClick: onWorkoutClick ? () => onWorkoutClick(w.id) : undefined,
+      };
+    }),
+    ...activities.map((a) => {
+      const status = displayStatusForActivity();
+      return {
+        key: `a-${a.id}`,
+        label: a.name,
+        className: chipClassForStatus(status),
+        title: `${a.name} · ${STATUS_BADGE_LABEL[status]}`,
+        onClick: onActivityClick ? () => onActivityClick(a.id) : undefined,
+      };
+    }),
   ];
 
   const visible = events.slice(0, MAX_VISIBLE_EVENTS);
@@ -71,6 +95,7 @@ export function CalendarDayEvents({
           key={event.key}
           label={event.label}
           className={event.className}
+          title={event.title}
           onClick={event.onClick}
         />
       ))}

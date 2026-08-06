@@ -445,7 +445,6 @@ button.calendar-month-popover-month.active:hover {
   border-radius: 4px;
   font-size: 0.68rem;
   font-weight: 600;
-  color: white;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -459,23 +458,209 @@ button.calendar-event-chip {
 }
 
 button.calendar-event-chip:hover {
-  filter: brightness(1.1);
+  filter: brightness(0.97);
 }
 
 .calendar-event-chip.chip-workout.status-scheduled {
   background: #2563eb;
+  color: white;
 }
 
 .calendar-event-chip.chip-workout.status-completed {
   background: #16a34a;
+  color: white;
 }
 
 .calendar-event-chip.chip-workout.status-skipped {
   background: #94a3b8;
+  color: white;
 }
 
 .calendar-event-chip.chip-activity {
   background: #ea580c;
+  color: white;
+}
+
+.calendar-status-chip-completed {
+  background: #e2e8f0;
+  color: #0f172a;
+}
+
+.calendar-status-chip-completed:hover {
+  background: #cbd5e1;
+}
+
+.calendar-status-chip-planned {
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.calendar-status-chip-planned:hover {
+  background: #e2e8f0;
+}
+
+.calendar-status-chip-missed {
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.calendar-status-chip-missed:hover {
+  background: #fee2e2;
+}
+
+.calendar-status-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: 0.6875rem;
+  color: #64748b;
+}
+
+.calendar-status-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.calendar-status-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.calendar-status-dot-completed {
+  background: #0f172a;
+}
+
+.calendar-status-dot-planned {
+  background: #94a3b8;
+}
+
+.calendar-status-dot-missed {
+  background: #dc2626;
+}
+
+.calendar-event-popup {
+  width: min(100%, 24rem);
+}
+
+.calendar-event-popup-sport-icon {
+  width: 1.25rem;
+  height: 1.25rem;
+  color: #64748b;
+  flex-shrink: 0;
+}
+
+.calendar-event-popup-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.calendar-event-popup-sub {
+  margin: 0;
+  font-size: 0.8125rem;
+}
+
+.calendar-event-popup-rows {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.calendar-event-popup-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  font-size: 0.8125rem;
+}
+
+.calendar-event-popup-badge {
+  font-size: 0.625rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0.15rem 0.45rem;
+  border-radius: 999px;
+}
+
+.calendar-event-popup-badge.status-completed {
+  background: #0f172a;
+  color: white;
+}
+
+.calendar-event-popup-badge.status-planned {
+  background: #e2e8f0;
+  color: #334155;
+}
+
+.calendar-event-popup-badge.status-missed {
+  background: #dc2626;
+  color: white;
+}
+
+.calendar-event-popup-missed {
+  border: 1px dashed #fca5a5;
+  border-radius: 6px;
+  padding: 0.75rem;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.calendar-event-popup-missed > p {
+  margin: 0;
+  font-size: 0.75rem;
+}
+
+button.calendar-event-popup-upload {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  width: 100%;
+  background: #dc2626;
+  color: white;
+  border: 1px solid #dc2626;
+  border-radius: 6px;
+  padding: 0.4rem 0.65rem;
+  font-size: 0.75rem;
+}
+
+button.calendar-event-popup-upload:hover:not(:disabled) {
+  background: #b91c1c;
+}
+
+.calendar-event-popup-upload-icon {
+  width: 1rem;
+  height: 1rem;
+}
+
+.calendar-event-popup-upload-msg {
+  margin: 0;
+  font-size: 0.75rem;
+}
+
+.calendar-event-popup-cta {
+  padding-top: 0.25rem;
+}
+
+.calendar-event-popup-primary-link {
+  display: block;
+  text-decoration: none;
+}
+
+button.calendar-event-popup-primary {
+  width: 100%;
+  font-size: 0.75rem;
+  padding: 0.45rem 0.75rem;
 }
 
 .calendar-event-more {

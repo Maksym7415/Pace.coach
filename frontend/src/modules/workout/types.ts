@@ -15,6 +15,8 @@ export type TargetType = "none" | "heart_rate" | "pace" | "power" | "cadence";
 export type DurationType = "time" | "distance" | "lap_button";
 
 export type WorkoutStep = {
+  id?: string;
+  templateStepId?: string;
   type: StepType;
   durationType?: DurationType;
   duration: number | null;
@@ -28,6 +30,7 @@ export type WorkoutStep = {
 };
 
 export type RepeatBlock = {
+  id?: string;
   repeatCount: number;
   steps: WorkoutStep[];
 };

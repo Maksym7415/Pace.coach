@@ -33,6 +33,7 @@ class TrackPoint(BaseModel):
 class Lap(BaseModel):
     lap_number: int
     duration: float | None = None
+    timer_time: float | None = None
     distance: float | None = None
     avg_hr: int | None = None
     max_hr: int | None = None
@@ -43,6 +44,52 @@ class Lap(BaseModel):
     max_motor_power: int | None = None
     avg_speed: float | None = None
     avg_pace: float | None = None
+    start_time: datetime | None = None
+    message_index: int | None = None
+    wkt_step_index: int | None = None
+    lap_trigger: str | None = None
+    intensity: str | None = None
+
+
+class DeviceWorkoutStep(BaseModel):
+    """Prescribed step embedded in an activity FIT file."""
+
+    message_index: int | None = None
+    duration_type: str | None = None
+    duration_value: float | None = None
+    duration_distance: float | None = None
+    duration_time: float | None = None
+    duration_step: int | None = None
+    repeat_steps: int | None = None
+    target_type: str | None = None
+    target_value: float | None = None
+    custom_target_value_low: float | None = None
+    custom_target_value_high: float | None = None
+    custom_target_speed_low: float | None = None
+    custom_target_speed_high: float | None = None
+    intensity: str | None = None
+    notes: str | None = None
+    wkt_step_name: str | None = None
+
+
+class DeviceWorkout(BaseModel):
+    """Workout definition embedded in an activity FIT file."""
+
+    wkt_name: str | None = None
+    sport: str | None = None
+    sub_sport: str | None = None
+    num_valid_steps: int | None = None
+    steps: list[DeviceWorkoutStep] = Field(default_factory=list)
+
+
+class FitEvent(BaseModel):
+    """Event message from an activity FIT file."""
+
+    timestamp: datetime | None = None
+    event: str | None = None
+    event_type: str | None = None
+    data: Any | None = None
+    event_group: int | None = None
 
 
 class ActivityMeta(BaseModel):
@@ -77,3 +124,5 @@ class NormalizedActivity(BaseModel):
     laps: list[Lap] = Field(default_factory=list)
     track_points: list[TrackPoint] = Field(default_factory=list)
     developer_fields: dict[str, Any] | None = None
+    device_workout: DeviceWorkout | None = None
+    events: list[FitEvent] = Field(default_factory=list)
