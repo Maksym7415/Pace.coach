@@ -1,17 +1,20 @@
-"""Orchestrates the execution matching pipeline."""
+"""Orchestrates the execution matching pipeline and read API."""
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload, selectinload
 
 from src.modules.activity_import.models import ActivityLap, ActivitySource, ActivityTrackPoint
+from src.modules.coaching.relations import get_active_coach_athlete_relation
 from src.modules.execution.adapters.garmin import GarminEvidenceAdapter
 from src.modules.execution.correlation import correlate_structurally
 from src.modules.execution.domain import (
     ActivityEvidence,
     InsightClaim,
+    ResolvedOccurrence,
     ResolvedPlan,
     SegmentMatch,
 )
@@ -30,6 +33,13 @@ from src.modules.execution.models import (
     WorkoutStepExecution,
 )
 from src.modules.execution.plan_source import JsonWorkoutPlanSource, PlanSource
+from src.modules.execution.schemas import (
+    ExecutionIssueOut,
+    PlannedStepOut,
+    StepExecutionOut,
+    WorkoutExecutionOut,
+    WorkoutStubOut,
+)
 from src.modules.execution.scoring import score_occurrence
 from src.modules.execution.segmentation.device_step_index import DeviceStepIndexStrategy
 from src.modules.execution.segmentation.lap_structure import LapStructureStrategy
@@ -368,3 +378,144 @@ class ExecutionMatchingService:
             device_workout=device_workout,
             events=events,
         )
+
+
+class WorkoutExecutionService:
+    """Read-only access to persisted WorkoutExecution results."""
+
+    def __init__(self, db: Session):
+        self.db = db
+
+    def get_for_activity(
+        self, user_id: int, activity_id: int
+    ) -> tuple[dict[str, Any] | None, str | None, int]:
+        activity = self.db.get(Activity, activity_id)
+        if activity is None:
+            return None, "Activity not found", 404
+
+        if not self._can_access_activity(user_id, activity):
+            return None, "Activity not found", 404
+
+        execution = self.db.scalar(
+            select(WorkoutExecution)
+            .where(WorkoutExecution.activity_id == activity_id)
+            .options(
+                selectinload(WorkoutExecution.step_executions),
+                selectinload(WorkoutExecution.issues),
+                joinedload(WorkoutExecution.plan_snapshot),
+                joinedload(WorkoutExecution.workout).joinedload(Workout.sport),
+            )
+            .order_by(WorkoutExecution.created_at.desc(), WorkoutExecution.id.desc())
+            .limit(1)
+        )
+
+        if execution is None:
+            return {"workout_execution": None}, None, 200
+
+        return {
+            "workout_execution": serialize_workout_execution(execution).model_dump(mode="json"),
+        }, None, 200
+
+    def _can_access_activity(self, user_id: int, activity: Activity) -> bool:
+        if activity.user_id == user_id:
+            return True
+        return get_active_coach_athlete_relation(self.db, user_id, activity.user_id) is not None
+
+
+def serialize_workout_execution(execution: WorkoutExecution) -> WorkoutExecutionOut:
+    """Join step rows to the plan snapshot and nest issues under each occurrence."""
+    snapshot = execution.plan_snapshot
+    plan = ResolvedPlan.model_validate(snapshot.resolved_plan) if snapshot else ResolvedPlan()
+    occ_by_key: dict[tuple[str, int], ResolvedOccurrence] = {
+        (o.authored_step_id, o.occurrence_ordinal): o for o in plan.occurrences
+    }
+
+    issues_by_key: dict[tuple[str, int], list[ExecutionIssue]] = {}
+    for issue in execution.issues:
+        if issue.authored_step_id is None or issue.occurrence_ordinal is None:
+            continue
+        key = (issue.authored_step_id, issue.occurrence_ordinal)
+        issues_by_key.setdefault(key, []).append(issue)
+
+    step_rows = sorted(
+        execution.step_executions,
+        key=lambda s: (s.occurrence_ordinal, s.authored_step_id),
+    )
+
+    step_outs: list[StepExecutionOut] = []
+    for step in step_rows:
+        key = (step.authored_step_id, step.occurrence_ordinal)
+        occurrence = occ_by_key.get(key)
+        step_outs.append(
+            StepExecutionOut(
+                authored_step_id=step.authored_step_id,
+                occurrence_path=step.occurrence_path,
+                occurrence_ordinal=step.occurrence_ordinal,
+                status=step.status,
+                planned=_planned_from_occurrence(occurrence),
+                duration_moving_s=step.duration_moving_s,
+                distance_m=step.distance_m,
+                target_metric=step.target_metric,
+                time_in_target_pct=step.time_in_target_pct,
+                target_deviation_pct=step.target_deviation_pct,
+                score=step.score,
+                issues=[
+                    ExecutionIssueOut(
+                        id=issue.id,
+                        code=issue.code,
+                        severity=issue.severity,
+                        dimension=issue.dimension,
+                    )
+                    for issue in issues_by_key.get(key, [])
+                ],
+            )
+        )
+
+    workout = execution.workout
+    sport_code = workout.sport.code if workout and workout.sport else None
+
+    return WorkoutExecutionOut(
+        id=execution.id,
+        workout_id=execution.workout_id,
+        activity_id=execution.activity_id,
+        status=execution.status,
+        overall_confidence=execution.overall_confidence,
+        algorithm_version=execution.algorithm_version,
+        issue_count=sum(len(s.issues) for s in step_outs),
+        workout=WorkoutStubOut(
+            id=workout.id if workout else execution.workout_id,
+            title=workout.title if workout else "",
+            sport_code=sport_code,
+            scheduled_date=workout.scheduled_date if workout else datetime.utcnow().date(),
+        ),
+        step_executions=step_outs,
+    )
+
+
+def _planned_from_occurrence(occurrence: ResolvedOccurrence | None) -> PlannedStepOut:
+    if occurrence is None:
+        return PlannedStepOut(step_type="run")
+    target = occurrence.target
+    return PlannedStepOut(
+        step_type=occurrence.step_type.value
+        if hasattr(occurrence.step_type, "value")
+        else str(occurrence.step_type),
+        duration_type=(
+            occurrence.duration_type.value
+            if hasattr(occurrence.duration_type, "value")
+            else str(occurrence.duration_type)
+            if occurrence.duration_type is not None
+            else None
+        ),
+        duration_min=occurrence.duration_min,
+        distance_m=occurrence.distance_m,
+        target_type=(
+            target.target_type.value
+            if target.target_type is not None and hasattr(target.target_type, "value")
+            else (str(target.target_type) if target.target_type is not None else None)
+        ),
+        target_min=target.target_min,
+        target_max=target.target_max,
+        target_zone_name=target.target_zone_name,
+        notes=occurrence.notes,
+    )

@@ -17,6 +17,7 @@ from src.modules.activity_import.deps import configure_storage_provider
 from src.modules.activity_import.local_storage import LocalFilesystemStorage
 from src.modules.athlete_profile.router import router as athlete_profile_router
 from src.modules.coaching.router import router as coaching_router
+from src.modules.execution.router import router as execution_router
 from src.modules.gear_track.router import router as gear_track_router
 from src.modules.identity.router import router as identity_router
 from src.modules.recovery.router import router as recovery_router
@@ -98,6 +99,7 @@ def create_app() -> FastAPI:
     app.include_router(coaching_router)
     app.include_router(recovery_router)
     app.include_router(training_router)
+    app.include_router(execution_router)
 
     @app.exception_handler(HTTPException)
     async def http_exception_handler(request: Request, exc: HTTPException):

@@ -127,6 +127,34 @@ def test_activities_list_requires_auth():
     assert response.status_code == 401
 
 
+def test_workout_execution_requires_auth():
+    response = client.get("/api/activities/1/workout-execution")
+    assert response.status_code == 401
+
+
+def test_workout_execution_missing_activity():
+    client.post(
+        "/api/auth/register",
+        json={
+            "username": "execmiss1",
+            "email": "execmiss1@example.com",
+            "password": "password1234",
+            "name": "Exec",
+        },
+    )
+    login = client.post(
+        "/api/auth/login",
+        json={"identifier": "execmiss1", "password": "password1234"},
+    )
+    token = login.json()["token"]
+    response = client.get(
+        "/api/activities/999999/workout-execution",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 404
+    assert response.json()["success"] is False
+
+
 def test_activities_list_invalid_date_range():
     client.post(
         "/api/auth/register",

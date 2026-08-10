@@ -2,36 +2,33 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { getActivity, type Activity } from "./api";
 import { formatDistance, formatDuration } from "./format";
-import { Chip, PageFrame, SectionBox, SectionRow } from "../shared/PageChrome";
-import { addDaysIso, todayIso, toDateKey } from "../shared/dates";
-import { getCalendar, type Workout } from "../training/api";
-import { formatWorkoutPreview } from "../workout/format";
-import { isRepeatBlock, type WorkoutStepItem } from "../workout/types";
-
-function flattenStepLabels(steps: WorkoutStepItem[] | null | undefined, sportCode: string | null) {
-  if (!steps?.length) return [] as string[];
-  const labels: string[] = [];
-  for (const item of steps) {
-    if (isRepeatBlock(item)) {
-      labels.push(`${item.repeatCount}× block`);
-      for (const step of item.steps) {
-        labels.push(...formatWorkoutPreview([step], sportCode, true));
-      }
-    } else {
-      labels.push(...formatWorkoutPreview([item], sportCode, true));
-    }
-  }
-  return labels;
-}
+import { Chip, PageFrame, SectionBox } from "../shared/PageChrome";
+import { toDateKey } from "../shared/dates";
+import { getWorkoutExecution } from "../execution/api";
+import { PlannedVsActual } from "../execution/PlannedVsActual";
+import {
+  firstQuestionIndexForStep,
+  questionsForExecution,
+} from "../execution/questions";
+import type { StepExecution, WorkoutExecution } from "../execution/types";
+import {
+  WorkoutReviewBanner,
+  WorkoutReviewDrawer,
+  WorkoutReviewedLine,
+} from "../execution/WorkoutReviewDrawer";
 
 export function ActivityDetailsPage() {
   const { activityId } = useParams<{ activityId: string }>();
   const id = Number(activityId);
 
   const [activity, setActivity] = useState<Activity | null>(null);
-  const [linkedWorkout, setLinkedWorkout] = useState<Workout | null>(null);
+  const [execution, setExecution] = useState<WorkoutExecution | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [drawerStartIndex, setDrawerStartIndex] = useState(0);
+  const [reviewed, setReviewed] = useState(false);
 
   useEffect(() => {
     if (!Number.isFinite(id)) {
@@ -43,23 +40,20 @@ export function ActivityDetailsPage() {
     let cancelled = false;
     setLoading(true);
     setError(null);
+    setReviewed(false);
 
-    getActivity(id).then(async (result) => {
+    Promise.all([getActivity(id), getWorkoutExecution(id)]).then(([activityResult, execResult]) => {
       if (cancelled) return;
-      if (!result.success || !result.activity) {
-        setError(result.error ?? "Failed to load activity");
+      if (!activityResult.success || !activityResult.activity) {
+        setError(activityResult.error ?? "Failed to load activity");
         setLoading(false);
         return;
       }
-      setActivity(result.activity);
-
-      const end = todayIso();
-      const start = addDaysIso(end, -45);
-      const calendar = await getCalendar(start, end);
-      if (!cancelled && calendar.success) {
-        const match =
-          calendar.workouts.find((w) => w.activity_id === result.activity!.id) ?? null;
-        setLinkedWorkout(match);
+      setActivity(activityResult.activity);
+      if (execResult.success) {
+        setExecution(execResult.workout_execution ?? null);
+      } else {
+        setExecution(null);
       }
       setLoading(false);
     });
@@ -69,17 +63,34 @@ export function ActivityDetailsPage() {
     };
   }, [id]);
 
-  const plannedLabels = useMemo(
-    () => flattenStepLabels(linkedWorkout?.steps, linkedWorkout?.sport_code ?? null),
-    [linkedWorkout],
+  const questions = useMemo(
+    () => (execution ? questionsForExecution(execution) : []),
+    [execution],
   );
+
+  function openReview(startIndex = 0) {
+    setDrawerStartIndex(startIndex);
+    setDrawerOpen(true);
+  }
+
+  function handleSelectStep(step: StepExecution) {
+    const idx = firstQuestionIndexForStep(questions, step);
+    if (idx >= 0) openReview(idx);
+  }
 
   if (loading) return <p className="muted">Loading activity…</p>;
   if (error) return <p className="error">{error}</p>;
   if (!activity) return <p className="muted">Activity not found.</p>;
 
   const sportLabel =
-    activity.activity_type_code ?? activity.sport_code ?? linkedWorkout?.sport_name ?? "Activity";
+    activity.activity_type_code ??
+    activity.sport_code ??
+    execution?.workout.sport_code ??
+    "Activity";
+
+  const contextLabel = execution
+    ? `${execution.workout.title} · ${toDateKey(activity.date)}`
+    : toDateKey(activity.date);
 
   return (
     <PageFrame title={`Activity · ${activity.id}`} question="Was this workout executed well?">
@@ -88,14 +99,14 @@ export function ActivityDetailsPage() {
           <div>
             <div className="text-lg font-semibold text-slate-900">
               {activity.name}
-              {linkedWorkout ? " · linked plan" : ""}
+              {execution ? " · linked plan" : ""}
             </div>
             <div className="text-sm text-slate-500">
               {[
                 sportLabel,
                 formatDuration(activity.total_hours),
                 toDateKey(activity.date),
-                linkedWorkout ? `vs ${linkedWorkout.title}` : null,
+                execution ? `vs ${execution.workout.title}` : null,
               ]
                 .filter(Boolean)
                 .join(" · ")}
@@ -113,35 +124,22 @@ export function ActivityDetailsPage() {
         </div>
       </SectionBox>
 
+      {!reviewed && questions.length > 0 ? (
+        <WorkoutReviewBanner count={questions.length} onReview={() => openReview(0)} />
+      ) : null}
+
       <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_320px]">
         <div className="grid gap-3">
-          <SectionBox label="Planned vs Actual" note="steps vs recorded summary">
-            {linkedWorkout ? (
-              <>
-                <div className="mb-1 text-[11px] text-slate-400">Planned</div>
-                <div className="mb-3 flex flex-wrap gap-1">
-                  {plannedLabels.length > 0 ? (
-                    plannedLabels.map((label) => <Chip key={label}>{label}</Chip>)
-                  ) : (
-                    <span className="text-sm text-slate-500">No structured steps</span>
-                  )}
-                </div>
-                <div className="mb-1 text-[11px] text-slate-400">Actual</div>
-                <div className="flex flex-wrap gap-1">
-                  <Chip>{formatDistance(activity.total_distance_km)}</Chip>
-                  <Chip>{formatDuration(activity.total_hours)}</Chip>
-                  <Chip>{sportLabel}</Chip>
-                  {activity.total_sessions != null && (
-                    <Chip>{activity.total_sessions} sessions</Chip>
-                  )}
-                </div>
-              </>
-            ) : (
+          {execution ? (
+            <PlannedVsActual execution={execution} onSelectStep={handleSelectStep} />
+          ) : (
+            <SectionBox label="Planned vs Actual" note="matched workout steps">
               <p className="text-sm text-slate-500">
-                No linked workout plan for this activity.
+                No workout execution for this activity yet. Structured FIT imports with a linked
+                plan will appear here.
               </p>
-            )}
-          </SectionBox>
+            </SectionBox>
+          )}
 
           <SectionBox label="Charts · Pace / HR / Power" note="streams not available yet">
             <div className="grid gap-2">
@@ -157,18 +155,9 @@ export function ActivityDetailsPage() {
             </div>
           </SectionBox>
 
-          <SectionRow cols={2}>
-            <SectionBox label="Laps" note="placeholder">
-              <p className="text-sm text-slate-500">
-                {activity.total_sessions != null
-                  ? `${activity.total_sessions} session(s) recorded — lap breakdown coming soon.`
-                  : "Lap data not available yet."}
-              </p>
-            </SectionBox>
-            <SectionBox label="Time in Zones" note="placeholder">
-              <p className="text-sm text-slate-500">Zone distribution coming soon.</p>
-            </SectionBox>
-          </SectionRow>
+          <SectionBox label="Time in Zones" note="placeholder">
+            <p className="text-sm text-slate-500">Zone distribution coming soon.</p>
+          </SectionBox>
         </div>
 
         <div className="grid gap-3">
@@ -188,18 +177,30 @@ export function ActivityDetailsPage() {
             <ul className="divide-y divide-slate-100 text-sm text-slate-600">
               <li className="py-1.5">Algorithmic and AI insights will appear here.</li>
             </ul>
+            {reviewed && questions.length > 0 ? (
+              <div className="mt-2">
+                <WorkoutReviewedLine count={questions.length} />
+              </div>
+            ) : null}
           </SectionBox>
 
           <SectionBox label="Notes" note="placeholder">
             <p className="text-sm text-slate-500">Athlete ↔ coach notes coming soon.</p>
-            {linkedWorkout?.notes && (
-              <p className="mt-2 rounded border border-slate-200 bg-slate-50 p-2 text-sm text-slate-700">
-                Workout note: {linkedWorkout.notes}
-              </p>
-            )}
           </SectionBox>
         </div>
       </div>
+
+      {questions.length > 0 ? (
+        <WorkoutReviewDrawer
+          questions={questions}
+          contextLabel={contextLabel}
+          sportCode={execution?.workout.sport_code ?? null}
+          startIndex={drawerStartIndex}
+          open={drawerOpen}
+          onOpenChange={setDrawerOpen}
+          onComplete={() => setReviewed(true)}
+        />
+      ) : null}
     </PageFrame>
   );
 }

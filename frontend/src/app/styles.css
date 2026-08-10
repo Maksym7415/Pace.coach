@@ -77,6 +77,11 @@ button {
   font-size: 0.875rem;
 }
 
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 button:hover:not(:disabled):not(.calendar-event-chip):not(.scale-chip) {
   background: #f8fafc;
 }

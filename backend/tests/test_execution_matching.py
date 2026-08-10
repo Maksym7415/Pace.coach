@@ -349,3 +349,195 @@ def test_signal_strategy_segments_by_planned_distance():
     assert all(m.window is not None for m in matches)
     assert all(m.evidence.strategy_id == "signal" for m in matches)
     assert matches[0].evidence.details.get("approximate") is True
+
+
+def test_serialize_workout_execution_nests_issues_and_joins_planned():
+    """Serializer joins snapshot planned side and nests issues under steps."""
+    from types import SimpleNamespace
+    from datetime import date
+
+    from src.modules.execution.service import serialize_workout_execution
+
+    steps = ensure_step_ids(
+        [
+            {"type": "warmup", "durationType": "time", "duration": 10},
+            {
+                "type": "interval",
+                "durationType": "distance",
+                "distance": 400,
+                "targetType": "pace",
+                "targetMin": 220,
+                "targetMax": 230,
+            },
+            {"type": "cooldown", "durationType": "lap_button"},
+        ]
+    )
+    plan = resolve_plan(steps, workout_id=7, sport_code="running")
+    assert len(plan.occurrences) == 3
+
+    interval = plan.occurrences[1]
+    issues = [
+        SimpleNamespace(
+            id=101,
+            authored_step_id=interval.authored_step_id,
+            occurrence_ordinal=interval.occurrence_ordinal,
+            code="below_target_adherence",
+            severity="warning",
+            dimension="intensity",
+        ),
+        SimpleNamespace(
+            id=102,
+            authored_step_id=None,
+            occurrence_ordinal=None,
+            code="orphan",
+            severity="info",
+            dimension="matching",
+        ),
+    ]
+    step_rows = [
+        SimpleNamespace(
+            authored_step_id=occ.authored_step_id,
+            occurrence_path=occ.occurrence_path,
+            occurrence_ordinal=occ.occurrence_ordinal,
+            status="executed",
+            duration_moving_s=60.0 * (i + 1),
+            distance_m=float(occ.distance_m or 0) or None,
+            target_metric="pace" if occ.target.target_type else None,
+            time_in_target_pct=30.0 if i == 1 else 90.0,
+            target_deviation_pct=-8.0 if i == 1 else 1.0,
+            score=70.0 if i == 1 else 95.0,
+        )
+        for i, occ in enumerate(plan.occurrences)
+    ]
+
+    execution = SimpleNamespace(
+        id=55,
+        workout_id=7,
+        activity_id=99,
+        status="partial",
+        overall_confidence=0.9,
+        algorithm_version="1.0.0",
+        plan_snapshot=SimpleNamespace(resolved_plan=plan.model_dump(mode="json")),
+        step_executions=step_rows,
+        issues=issues,
+        workout=SimpleNamespace(
+            id=7,
+            title="Threshold intervals",
+            scheduled_date=date(2026, 8, 6),
+            sport=SimpleNamespace(code="running"),
+        ),
+    )
+
+    out = serialize_workout_execution(execution)
+    assert out.id == 55
+    assert out.workout_id == 7
+    assert out.activity_id == 99
+    assert out.workout.title == "Threshold intervals"
+    assert out.workout.sport_code == "running"
+    assert len(out.step_executions) == 3
+    assert out.issue_count == 1  # orphan dropped
+
+    interval_out = out.step_executions[1]
+    assert interval_out.planned.step_type == "interval"
+    assert interval_out.planned.distance_m == 400
+    assert interval_out.planned.target_type == "pace"
+    assert interval_out.planned.target_min == 220
+    assert interval_out.planned.target_max == 230
+    assert [i.code for i in interval_out.issues] == ["below_target_adherence"]
+    assert interval_out.issues[0].severity == "warning"
+    assert out.step_executions[0].issues == []
+    assert out.step_executions[2].issues == []
+
+    dumped = out.model_dump(mode="json")
+    assert "score_components" not in dumped["step_executions"][0]
+    assert "match_evidence" not in dumped["step_executions"][0]
+    assert "payload" not in dumped["step_executions"][1]["issues"][0]
+    assert "segmentation_strategy" not in dumped
+
+
+@pytest.mark.skipif(not RESEARCH_FIT.exists(), reason="research FIT not available")
+def test_serialize_research_fit_occurrences_preserve_order():
+    """Planned labels come from the snapshot for the research FIT plan."""
+    from types import SimpleNamespace
+    from datetime import date
+
+    from src.modules.execution.service import serialize_workout_execution
+
+    normalized = FitParser.parse(RESEARCH_FIT.read_bytes())
+    evidence = GarminEvidenceAdapter().adapt(normalized, activity_id=1)
+    steps = ensure_step_ids(
+        [
+            {"type": "warmup", "durationType": "distance", "distance": 3000},
+            {
+                "repeatCount": 2,
+                "steps": [
+                    {"type": "interval", "durationType": "distance", "distance": 300},
+                    {"type": "recovery", "durationType": "distance", "distance": 400},
+                ],
+            },
+            {
+                "repeatCount": 2,
+                "steps": [
+                    {"type": "interval", "durationType": "distance", "distance": 200},
+                    {"type": "recovery", "durationType": "distance", "distance": 400},
+                ],
+            },
+            {"type": "cooldown", "durationType": "lap_button"},
+        ]
+    )
+    plan = resolve_plan(steps, sport_code="running")
+    correlation = correlate_structurally(plan, evidence.device_plan)
+    matches = DeviceStepIndexStrategy().segment(evidence, plan, correlation)
+
+    step_rows = [
+        SimpleNamespace(
+            authored_step_id=m.occurrence.authored_step_id,
+            occurrence_path=m.occurrence.occurrence_path,
+            occurrence_ordinal=m.occurrence.occurrence_ordinal,
+            status=m.status.value,
+            duration_moving_s=None,
+            distance_m=None,
+            target_metric=None,
+            time_in_target_pct=None,
+            target_deviation_pct=None,
+            score=None,
+        )
+        for m in matches
+    ]
+    execution = SimpleNamespace(
+        id=1,
+        workout_id=1,
+        activity_id=1,
+        status="matched",
+        overall_confidence=0.95,
+        algorithm_version="1.0.0",
+        plan_snapshot=SimpleNamespace(resolved_plan=plan.model_dump(mode="json")),
+        step_executions=step_rows,
+        issues=[],
+        workout=SimpleNamespace(
+            id=1,
+            title="Research FIT",
+            scheduled_date=date(2026, 1, 1),
+            sport=SimpleNamespace(code="running"),
+        ),
+    )
+    out = serialize_workout_execution(execution)
+    assert len(out.step_executions) == 10
+    assert [s.planned.step_type for s in out.step_executions] == [
+        "warmup",
+        "interval",
+        "recovery",
+        "interval",
+        "recovery",
+        "interval",
+        "recovery",
+        "interval",
+        "recovery",
+        "cooldown",
+    ]
+    assert [s.occurrence_ordinal for s in out.step_executions] == list(range(1, 11))
+    # Same authored step across repeat cycles
+    assert (
+        out.step_executions[1].authored_step_id
+        == out.step_executions[3].authored_step_id
+    )
