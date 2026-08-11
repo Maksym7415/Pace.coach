@@ -9,6 +9,7 @@ from src.modules.execution.domain import (
     ExecutionMetrics,
     ExecutionWindow,
     ResolvedOccurrence,
+    ordered_target_bounds,
 )
 from src.modules.fit_parser.models import TrackPoint
 from src.modules.training.workout_steps import TargetType
@@ -147,12 +148,12 @@ class RunningMetricExtractor(MetricExtractor):
         if target.target_type and target.target_type != TargetType.none:
             target_metric = target.target_type.value
             series = _target_series(points, target.target_type)
-            if series and target.target_min is not None and target.target_max is not None:
-                in_range = sum(
-                    1 for v in series if target.target_min <= v <= target.target_max
-                )
+            bounds = ordered_target_bounds(target.target_min, target.target_max)
+            if series and bounds is not None:
+                lo, hi = bounds
+                in_range = sum(1 for v in series if lo <= v <= hi)
                 time_in_target_pct = (in_range / len(series)) * 100.0
-                mid_target = (target.target_min + target.target_max) / 2.0
+                mid_target = (lo + hi) / 2.0
                 avg_val = _mean(series)
                 if avg_val is not None and mid_target != 0:
                     # Signed: positive = above target (for pace: slower; for HR/power: higher)

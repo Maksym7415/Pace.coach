@@ -12,6 +12,7 @@ from src.modules.execution.domain import (
     ResolvedOccurrence,
     ResolvedPlan,
     SegmentMatch,
+    ordered_target_bounds,
 )
 from src.modules.execution.enums import EvidenceCapability, StepExecutionStatus
 from src.modules.execution.segmentation.base import SegmentationStrategy
@@ -23,7 +24,10 @@ def _point_target_value(point: TrackPoint, target_type: TargetType | None) -> fl
     if target_type is None or target_type == TargetType.none:
         return None
     if target_type == TargetType.pace:
-        return point.pace
+        # TrackPoint.pace is min/km; planned targets are s/km.
+        if point.pace is None or point.pace <= 0:
+            return None
+        return float(point.pace) * 60.0
     if target_type == TargetType.heart_rate:
         return float(point.heart_rate) if point.heart_rate is not None else None
     if target_type == TargetType.power:
@@ -236,8 +240,12 @@ class SignalSegmentationStrategy(SegmentationStrategy):
         occurrence: ResolvedOccurrence,
     ) -> int | None:
         target = occurrence.target
-        if target.target_type is None or target.target_min is None or target.target_max is None:
+        if target.target_type is None:
             return None
+        bounds = ordered_target_bounds(target.target_min, target.target_max)
+        if bounds is None:
+            return None
+        lo, hi = bounds
         # Look for sustained departure from target after mid-window as a soft boundary hint.
         # Keep planned end if no clear change; this refinement is intentionally conservative.
         mid = start_i + (end_i - start_i) // 2
@@ -246,7 +254,7 @@ class SignalSegmentationStrategy(SegmentationStrategy):
             value = _point_target_value(timeline[i], target.target_type)
             if value is None:
                 continue
-            if value < target.target_min or value > target.target_max:
+            if value < lo or value > hi:
                 outside += 1
             else:
                 outside = 0

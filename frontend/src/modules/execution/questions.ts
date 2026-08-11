@@ -1,6 +1,6 @@
 /**
  * Athlete questions are presentation/workflow derived from ExecutionIssue facts.
- * Not persisted — when backend Question entities arrive, only this module changes.
+ * Responses persist on ExecutionIssue via the athlete-responses API.
  */
 import { formatPlannedLabel } from "./labels";
 import { SEVERITY_RANK_SORT } from "./severity";
@@ -139,6 +139,28 @@ export function questionsForExecution(execution: WorkoutExecution): AthleteQuest
   });
 
   return questions;
+}
+
+/** Seed drawer state from persisted athlete_response fields. */
+export function initialResponsesFromQuestions(
+  questions: AthleteQuestion[],
+): Record<number, IssueResponse> {
+  const out: Record<number, IssueResponse> = {};
+  for (const q of questions) {
+    const saved = q.issue.athlete_response;
+    if (!saved) continue;
+    out[q.issue_id] = {
+      reason: saved.reason ?? undefined,
+      otherText: saved.reason_other ?? undefined,
+      notes: saved.notes ?? undefined,
+    };
+  }
+  return out;
+}
+
+export function allIssuesResponded(execution: WorkoutExecution | null | undefined): boolean {
+  if (!execution || execution.issue_count < 1) return false;
+  return (execution.responded_issue_count ?? 0) >= execution.issue_count;
 }
 
 /** Index of the first question belonging to this step, or -1. */

@@ -4,11 +4,13 @@ import { getActivity, type Activity } from "./api";
 import { formatDistance, formatDuration } from "./format";
 import { Chip, PageFrame, SectionBox } from "../shared/PageChrome";
 import { toDateKey } from "../shared/dates";
-import { getWorkoutExecution } from "../execution/api";
+import { getWorkoutExecution, saveAthleteResponses } from "../execution/api";
 import { PlannedVsActual } from "../execution/PlannedVsActual";
 import {
+  allIssuesResponded,
   firstQuestionIndexForStep,
   questionsForExecution,
+  type IssueResponse,
 } from "../execution/questions";
 import type { StepExecution, WorkoutExecution } from "../execution/types";
 import {
@@ -28,7 +30,6 @@ export function ActivityDetailsPage() {
 
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [drawerStartIndex, setDrawerStartIndex] = useState(0);
-  const [reviewed, setReviewed] = useState(false);
 
   useEffect(() => {
     if (!Number.isFinite(id)) {
@@ -40,7 +41,6 @@ export function ActivityDetailsPage() {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    setReviewed(false);
 
     Promise.all([getActivity(id), getWorkoutExecution(id)]).then(([activityResult, execResult]) => {
       if (cancelled) return;
@@ -67,6 +67,7 @@ export function ActivityDetailsPage() {
     () => (execution ? questionsForExecution(execution) : []),
     [execution],
   );
+  const reviewed = allIssuesResponded(execution);
 
   function openReview(startIndex = 0) {
     setDrawerStartIndex(startIndex);
@@ -76,6 +77,20 @@ export function ActivityDetailsPage() {
   function handleSelectStep(step: StepExecution) {
     const idx = firstQuestionIndexForStep(questions, step);
     if (idx >= 0) openReview(idx);
+  }
+
+  async function handleReviewComplete(responses: Record<number, IssueResponse>) {
+    const payload = Object.entries(responses).map(([issueId, response]) => ({
+      issue_id: Number(issueId),
+      reason: response.reason ?? null,
+      reason_other: response.otherText ?? null,
+      notes: response.notes ?? null,
+    }));
+    const result = await saveAthleteResponses(id, payload);
+    if (!result.success || !result.workout_execution) {
+      throw new Error(result.error ?? "Failed to save responses");
+    }
+    setExecution(result.workout_execution);
   }
 
   if (loading) return <p className="muted">Loading activity…</p>;
@@ -198,7 +213,7 @@ export function ActivityDetailsPage() {
           startIndex={drawerStartIndex}
           open={drawerOpen}
           onOpenChange={setDrawerOpen}
-          onComplete={() => setReviewed(true)}
+          onComplete={handleReviewComplete}
         />
       ) : null}
     </PageFrame>

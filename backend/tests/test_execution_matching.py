@@ -231,6 +231,51 @@ def test_running_metric_extractor_time_in_target():
     assert metrics.metrics["avg_pace_s_per_km"] == pytest.approx(240.0)
 
 
+def test_running_metric_extractor_inverted_pace_bounds():
+    """Pace authored slow→fast (6:00–5:15) stores min > max; must still count in-range."""
+    from src.modules.execution.domain import ResolvedStepTarget
+
+    start = datetime(2026, 1, 1, 10, 0, 0)
+    # ~5:48 /km = 5.8 min/km = 348 s/km, inside 315–360
+    points = [
+        TrackPoint(
+            timestamp=start + timedelta(seconds=i),
+            distance=float(i * 10),
+            pace=5.8,
+            speed=60.0 / 5.8,
+        )
+        for i in range(10)
+    ]
+    evidence = ActivityEvidence(
+        vendor="garmin",
+        timeline=points,
+        capabilities={EvidenceCapability.timeline, EvidenceCapability.pace},
+    )
+    occurrence = ResolvedOccurrence(
+        authored_step_id="s1",
+        occurrence_path="0",
+        occurrence_ordinal=1,
+        step_type=StepType.warmup,
+        duration_type=DurationType.distance,
+        distance_m=3000,
+        target=ResolvedStepTarget(
+            target_type=TargetType.pace,
+            target_min=360,  # 6:00
+            target_max=315,  # 5:15
+        ),
+    )
+    window = ExecutionWindow(
+        started_at=start,
+        ended_at=start + timedelta(seconds=9),
+        authored_step_id="s1",
+        occurrence_path="0",
+        occurrence_ordinal=1,
+        confidence=0.9,
+    )
+    metrics = RunningMetricExtractor().extract(evidence, window, occurrence)
+    assert metrics.time_in_target_pct == pytest.approx(100.0)
+
+
 def test_scoring_null_when_no_target():
     from src.modules.execution.domain import ExecutionMetrics, ResolvedStepTarget
 

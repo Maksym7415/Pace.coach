@@ -82,8 +82,31 @@ button:disabled {
   cursor: not-allowed;
 }
 
-button:hover:not(:disabled):not(.calendar-event-chip):not(.scale-chip) {
+button:hover:not(:disabled):not(.calendar-event-chip):not(.scale-chip):not(.reason-chip) {
   background: #f8fafc;
+}
+
+button.reason-chip {
+  border-radius: 9999px;
+  padding: 0.25rem 0.75rem;
+  font-size: 0.75rem;
+  line-height: 1.25;
+  border: 1px solid #e2e8f0;
+  background: white;
+  color: #64748b;
+}
+
+button.reason-chip:hover:not(:disabled) {
+  border-color: #94a3b8;
+  color: #0f172a;
+  background: #f8fafc;
+}
+
+button.reason-chip-active,
+button.reason-chip-active:hover:not(:disabled) {
+  border-color: #1e293b;
+  background: #1e293b;
+  color: white;
 }
 
 button.scale-chip {

@@ -1,7 +1,9 @@
-export { getWorkoutExecution } from "./api";
+export { getWorkoutExecution, saveAthleteResponses } from "./api";
 export { PlannedVsActual } from "./PlannedVsActual";
 export {
+  allIssuesResponded,
   firstQuestionIndexForStep,
+  initialResponsesFromQuestions,
   questionsForExecution,
   type AthleteQuestion,
   type IssueResponse,

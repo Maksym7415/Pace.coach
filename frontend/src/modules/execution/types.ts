@@ -36,11 +36,19 @@ export type PlannedStep = {
   notes: string | null;
 };
 
+export type AthleteIssueResponse = {
+  reason: string | null;
+  reason_other: string | null;
+  notes: string | null;
+  responded_at: string | null;
+};
+
 export type ExecutionIssue = {
   id: number;
   code: string;
   severity: IssueSeverity;
   dimension: IssueDimension;
+  athlete_response?: AthleteIssueResponse | null;
 };
 
 export type StepExecution = {
@@ -73,6 +81,7 @@ export type WorkoutExecution = {
   overall_confidence: number | null;
   algorithm_version: string;
   issue_count: number;
+  responded_issue_count?: number;
   workout: WorkoutStub;
   step_executions: StepExecution[];
 };

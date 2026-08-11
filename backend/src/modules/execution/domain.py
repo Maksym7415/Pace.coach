@@ -50,6 +50,20 @@ class ResolvedStepTarget(BaseModel):
     target_zone_name: str | None = None
 
 
+def ordered_target_bounds(
+    target_min: float | None, target_max: float | None
+) -> tuple[float, float] | None:
+    """Numeric low/high for range checks.
+
+    Pace targets are often authored slow→fast (e.g. 6:00–5:15), which stores
+    target_min > target_max in s/km. Sorting keeps comparisons valid without
+    rewriting the authored display order.
+    """
+    if target_min is None or target_max is None:
+        return None
+    return (min(target_min, target_max), max(target_min, target_max))
+
+
 class ResolvedOccurrence(BaseModel):
     """One concrete planned execution of an authored step (after repeat expansion)."""
 

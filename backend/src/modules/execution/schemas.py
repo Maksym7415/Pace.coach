@@ -1,7 +1,7 @@
 """Pydantic response schemas for the WorkoutExecution read API."""
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 
 from pydantic import BaseModel, Field
 
@@ -20,6 +20,13 @@ class PlannedStepOut(BaseModel):
     notes: str | None = None
 
 
+class AthleteIssueResponseOut(BaseModel):
+    reason: str | None = None
+    reason_other: str | None = None
+    notes: str | None = None
+    responded_at: datetime | None = None
+
+
 class ExecutionIssueOut(BaseModel):
     """Objective algorithmic finding attached to one step occurrence."""
 
@@ -27,6 +34,18 @@ class ExecutionIssueOut(BaseModel):
     code: str
     severity: str
     dimension: str
+    athlete_response: AthleteIssueResponseOut | None = None
+
+
+class AthleteIssueResponseIn(BaseModel):
+    issue_id: int
+    reason: str | None = None
+    reason_other: str | None = None
+    notes: str | None = None
+
+
+class SaveAthleteResponsesIn(BaseModel):
+    responses: list[AthleteIssueResponseIn] = Field(default_factory=list)
 
 
 class StepExecutionOut(BaseModel):
@@ -63,5 +82,6 @@ class WorkoutExecutionOut(BaseModel):
     overall_confidence: float | None = None
     algorithm_version: str
     issue_count: int
+    responded_issue_count: int = 0
     workout: WorkoutStubOut
     step_executions: list[StepExecutionOut] = Field(default_factory=list)

@@ -34,8 +34,10 @@ from src.modules.execution.models import (
 )
 from src.modules.execution.plan_source import JsonWorkoutPlanSource, PlanSource
 from src.modules.execution.schemas import (
+    AthleteIssueResponseOut,
     ExecutionIssueOut,
     PlannedStepOut,
+    SaveAthleteResponsesIn,
     StepExecutionOut,
     WorkoutExecutionOut,
     WorkoutStubOut,
@@ -381,7 +383,7 @@ class ExecutionMatchingService:
 
 
 class WorkoutExecutionService:
-    """Read-only access to persisted WorkoutExecution results."""
+    """Read/write access to persisted WorkoutExecution results."""
 
     def __init__(self, db: Session):
         self.db = db
@@ -416,10 +418,82 @@ class WorkoutExecutionService:
             "workout_execution": serialize_workout_execution(execution).model_dump(mode="json"),
         }, None, 200
 
+    def save_athlete_responses(
+        self,
+        user_id: int,
+        activity_id: int,
+        payload: SaveAthleteResponsesIn,
+    ) -> tuple[dict[str, Any] | None, str | None, int]:
+        activity = self.db.get(Activity, activity_id)
+        if activity is None:
+            return None, "Activity not found", 404
+        if activity.user_id != user_id:
+            return None, "Only the athlete can explain execution issues", 403
+
+        execution = self.db.scalar(
+            select(WorkoutExecution)
+            .where(WorkoutExecution.activity_id == activity_id)
+            .options(
+                selectinload(WorkoutExecution.step_executions),
+                selectinload(WorkoutExecution.issues),
+                joinedload(WorkoutExecution.plan_snapshot),
+                joinedload(WorkoutExecution.workout).joinedload(Workout.sport),
+            )
+            .order_by(WorkoutExecution.created_at.desc(), WorkoutExecution.id.desc())
+            .limit(1)
+        )
+        if execution is None:
+            return None, "Workout execution not found", 404
+
+        issues_by_id = {issue.id: issue for issue in execution.issues}
+        now = datetime.utcnow()
+        updated = 0
+
+        for item in payload.responses:
+            issue = issues_by_id.get(item.issue_id)
+            if issue is None:
+                return None, f"Issue {item.issue_id} not found on this execution", 400
+
+            reason = (item.reason or "").strip() or None
+            reason_other = (item.reason_other or "").strip() or None
+            notes = (item.notes or "").strip() or None
+            if reason != "Other":
+                reason_other = None
+
+            issue.athlete_id = user_id
+            issue.athlete_reason = reason
+            issue.athlete_reason_other = reason_other
+            issue.athlete_notes = notes
+            issue.athlete_responded_at = now
+            updated += 1
+
+        self.db.commit()
+        self.db.refresh(execution)
+
+        return {
+            "updated": updated,
+            "workout_execution": serialize_workout_execution(execution).model_dump(mode="json"),
+        }, None, 200
+
     def _can_access_activity(self, user_id: int, activity: Activity) -> bool:
         if activity.user_id == user_id:
             return True
         return get_active_coach_athlete_relation(self.db, user_id, activity.user_id) is not None
+
+
+def _athlete_response_out(issue: ExecutionIssue) -> AthleteIssueResponseOut | None:
+    reason = getattr(issue, "athlete_reason", None)
+    reason_other = getattr(issue, "athlete_reason_other", None)
+    notes = getattr(issue, "athlete_notes", None)
+    responded_at = getattr(issue, "athlete_responded_at", None)
+    if reason is None and reason_other is None and notes is None and responded_at is None:
+        return None
+    return AthleteIssueResponseOut(
+        reason=reason,
+        reason_other=reason_other,
+        notes=notes,
+        responded_at=responded_at,
+    )
 
 
 def serialize_workout_execution(execution: WorkoutExecution) -> WorkoutExecutionOut:
@@ -443,9 +517,24 @@ def serialize_workout_execution(execution: WorkoutExecution) -> WorkoutExecution
     )
 
     step_outs: list[StepExecutionOut] = []
+    responded = 0
     for step in step_rows:
         key = (step.authored_step_id, step.occurrence_ordinal)
         occurrence = occ_by_key.get(key)
+        issue_outs: list[ExecutionIssueOut] = []
+        for issue in issues_by_key.get(key, []):
+            athlete_response = _athlete_response_out(issue)
+            if athlete_response and athlete_response.responded_at is not None:
+                responded += 1
+            issue_outs.append(
+                ExecutionIssueOut(
+                    id=issue.id,
+                    code=issue.code,
+                    severity=issue.severity,
+                    dimension=issue.dimension,
+                    athlete_response=athlete_response,
+                )
+            )
         step_outs.append(
             StepExecutionOut(
                 authored_step_id=step.authored_step_id,
@@ -459,15 +548,7 @@ def serialize_workout_execution(execution: WorkoutExecution) -> WorkoutExecution
                 time_in_target_pct=step.time_in_target_pct,
                 target_deviation_pct=step.target_deviation_pct,
                 score=step.score,
-                issues=[
-                    ExecutionIssueOut(
-                        id=issue.id,
-                        code=issue.code,
-                        severity=issue.severity,
-                        dimension=issue.dimension,
-                    )
-                    for issue in issues_by_key.get(key, [])
-                ],
+                issues=issue_outs,
             )
         )
 
@@ -482,6 +563,7 @@ def serialize_workout_execution(execution: WorkoutExecution) -> WorkoutExecution
         overall_confidence=execution.overall_confidence,
         algorithm_version=execution.algorithm_version,
         issue_count=sum(len(s.issues) for s in step_outs),
+        responded_issue_count=responded,
         workout=WorkoutStubOut(
             id=workout.id if workout else execution.workout_id,
             title=workout.title if workout else "",

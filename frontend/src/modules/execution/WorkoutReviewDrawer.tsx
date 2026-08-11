@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/sheet";
 import { formatActualLines, formatExpectedLines, formatPlannedLabel } from "./labels";
 import {
+  initialResponsesFromQuestions,
   type AthleteQuestion,
   type IssueResponse,
 } from "./questions";
@@ -89,18 +90,25 @@ export function WorkoutReviewDrawer({
   startIndex?: number;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onComplete?: (responses: Record<number, IssueResponse>) => void;
+  onComplete?: (responses: Record<number, IssueResponse>) => void | Promise<void>;
 }) {
   const [index, setIndex] = useState(startIndex);
   const [done, setDone] = useState(false);
-  const [responses, setResponses] = useState<Record<number, IssueResponse>>({});
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [responses, setResponses] = useState<Record<number, IssueResponse>>(() =>
+    initialResponsesFromQuestions(questions),
+  );
 
   useEffect(() => {
     if (open) {
       setIndex(Math.min(Math.max(0, startIndex), Math.max(0, questions.length - 1)));
       setDone(false);
+      setSaving(false);
+      setSaveError(null);
+      setResponses(initialResponsesFromQuestions(questions));
     }
-  }, [open, startIndex, questions.length]);
+  }, [open, startIndex, questions]);
 
   const question = questions[index];
   const isLast = index === questions.length - 1;
@@ -113,9 +121,22 @@ export function WorkoutReviewDrawer({
     }));
   };
 
-  const finish = () => {
-    setDone(true);
-    onComplete?.(responses);
+  const finish = async () => {
+    // Include every question so unanswered ones are still marked responded.
+    const payload: Record<number, IssueResponse> = {};
+    for (const q of questions) {
+      payload[q.issue_id] = responses[q.issue_id] ?? {};
+    }
+    setSaving(true);
+    setSaveError(null);
+    try {
+      await onComplete?.(payload);
+      setDone(true);
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Failed to save responses");
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -157,28 +178,31 @@ export function WorkoutReviewDrawer({
               />
             </div>
 
-            <div className="flex items-center justify-between gap-2 border-t border-slate-200 p-4">
-              <button
-                type="button"
-                className="secondary"
-                disabled={index === 0}
-                onClick={() => setIndex((i) => Math.max(0, i - 1))}
-              >
-                <span className="inline-flex items-center gap-1">
-                  <ChevronLeft className="h-4 w-4" /> Previous
-                </span>
-              </button>
-              {isLast ? (
-                <button type="button" onClick={finish}>
-                  Finish review
-                </button>
-              ) : (
-                <button type="button" onClick={() => setIndex((i) => i + 1)}>
+            <div className="flex flex-col gap-2 border-t border-slate-200 p-4">
+              {saveError ? <p className="text-xs text-red-600">{saveError}</p> : null}
+              <div className="flex items-center justify-between gap-2">
+                <button
+                  type="button"
+                  className="secondary"
+                  disabled={index === 0 || saving}
+                  onClick={() => setIndex((i) => Math.max(0, i - 1))}
+                >
                   <span className="inline-flex items-center gap-1">
-                    Next issue <ChevronRight className="h-4 w-4" />
+                    <ChevronLeft className="h-4 w-4" /> Previous
                   </span>
                 </button>
-              )}
+                {isLast ? (
+                  <button type="button" disabled={saving} onClick={() => void finish()}>
+                    {saving ? "Saving…" : "Finish review"}
+                  </button>
+                ) : (
+                  <button type="button" disabled={saving} onClick={() => setIndex((i) => i + 1)}>
+                    <span className="inline-flex items-center gap-1">
+                      Next issue <ChevronRight className="h-4 w-4" />
+                    </span>
+                  </button>
+                )}
+              </div>
             </div>
           </>
         )}
@@ -254,12 +278,7 @@ export function ExecutionIssueCard({
                 key={reason}
                 type="button"
                 onClick={() => onChange({ reason: active ? undefined : reason })}
-                className={cn(
-                  "rounded-full border px-3 py-1 text-xs transition-colors",
-                  active
-                    ? "border-slate-400 bg-slate-100 text-slate-900"
-                    : "border-slate-200 text-slate-500 hover:text-slate-900",
-                )}
+                className={cn("reason-chip", active && "reason-chip-active")}
               >
                 {reason}
               </button>

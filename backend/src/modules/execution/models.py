@@ -153,4 +153,14 @@ class ExecutionIssue(Base):
     payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime | None] = mapped_column(default=datetime.utcnow)
 
+    # Athlete explanation (structured response to this algorithmic finding)
+    athlete_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    athlete_reason: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    athlete_reason_other: Mapped[str | None] = mapped_column(Text, nullable=True)
+    athlete_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    athlete_responded_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
     workout_execution = relationship("WorkoutExecution", back_populates="issues")
+    athlete = relationship("User", foreign_keys=[athlete_id])
