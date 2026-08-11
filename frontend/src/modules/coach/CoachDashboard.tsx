@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { listAthletes, type CoachAthleteListItem } from "../coaching/api";
+import { PageFrame, SectionBox } from "../shared/PageChrome";
 import { AthleteList } from "./AthleteList";
 import { InviteAthleteForm } from "./InviteAthleteForm";
 
@@ -20,18 +21,14 @@ export function CoachDashboard() {
   }, []);
 
   return (
-    <div className="stack">
-      <h1>Athletes</h1>
-      <p className="muted">Manage your roster and schedule training. Triage on Today.</p>
-
-      <section className="stack">
-        <h2>Your athletes</h2>
-        {loading && <p className="muted">Loading athletes…</p>}
-        {error && <p className="error">{error}</p>}
+    <PageFrame title="Athletes" question="Who am I coaching?">
+      <SectionBox label="Roster" note="Pin an athlete to scope every shared workspace">
+        {loading && <p className="text-sm text-slate-500">Loading athletes…</p>}
+        {error && <p className="text-sm text-red-600">{error}</p>}
         {!loading && !error && <AthleteList athletes={athletes} />}
-      </section>
+      </SectionBox>
 
       <InviteAthleteForm />
-    </div>
+    </PageFrame>
   );
 }

@@ -26,6 +26,8 @@ export type ActivityListProps = {
   onRangeChange: (id: ActivityListRangeId) => void;
   loading?: boolean;
   error?: string | null;
+  /** Hide athlete-only empty hints (Strava connect). */
+  coachMode?: boolean;
 };
 
 export function ActivityList({
@@ -35,6 +37,7 @@ export function ActivityList({
   onRangeChange,
   loading = false,
   error = null,
+  coachMode = false,
 }: ActivityListProps) {
   const { user } = useAuth();
 
@@ -67,7 +70,9 @@ export function ActivityList({
       {!loading && !error && activities.length === 0 && (
         <p className="muted">
           No activities in this range.
-          {!user?.strava_connected && " Connect Strava in Settings to import your runs."}
+          {!coachMode && !user?.strava_connected
+            ? " Connect Strava in Settings to import your runs."
+            : ""}
         </p>
       )}
 

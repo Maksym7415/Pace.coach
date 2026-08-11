@@ -8,7 +8,13 @@ import { AthleteProfilePage } from "../modules/athlete-profile/AthleteProfilePag
 import { ActivitiesPage, AthleteSettingsPage } from "../modules/athlete/ActivitiesPage";
 import { StravaOAuthPage } from "../modules/athlete/strava/StravaOAuthPage";
 import { CoachDashboard } from "../modules/coach/CoachDashboard";
-import { AthleteDetailPage } from "../modules/coach/AthleteDetailPage";
+import { CoachActivitiesPage } from "../modules/coach/CoachActivitiesPage";
+import { AthleteWorkspaceLayout } from "../modules/coach/athlete/AthleteWorkspaceLayout";
+import { AthleteOverviewPage } from "../modules/coach/athlete/AthleteOverviewPage";
+import { AthletePlanPage } from "../modules/coach/athlete/AthletePlanPage";
+import { AthleteActivitiesPage } from "../modules/coach/athlete/AthleteActivitiesPage";
+import { AthletePerformancePage } from "../modules/coach/athlete/AthletePerformancePage";
+import { AthleteRecoveryPage } from "../modules/coach/athlete/AthleteRecoveryPage";
 import { PlanningHubPage } from "../modules/coach/PlanningHubPage";
 import { TemplatesPage } from "../modules/coach/TemplatesPage";
 import {
@@ -49,7 +55,7 @@ function RoleRedirect() {
 function ActivitiesOrComingSoon() {
   const { hasRole } = useAuth();
   if (hasRole("athlete")) return <ActivitiesPage />;
-  if (hasRole("coach")) return <ComingSoonPage title="Activities" />;
+  if (hasRole("coach")) return <CoachActivitiesPage />;
   return <Navigate to="/today" replace />;
 }
 
@@ -132,10 +138,16 @@ export function App() {
           path="/coach/athletes/:athleteId"
           element={
             <RequireRole role="coach">
-              <AthleteDetailPage />
+              <AthleteWorkspaceLayout />
             </RequireRole>
           }
-        />
+        >
+          <Route index element={<AthleteOverviewPage />} />
+          <Route path="plan" element={<AthletePlanPage />} />
+          <Route path="activities" element={<AthleteActivitiesPage />} />
+          <Route path="performance" element={<AthletePerformancePage />} />
+          <Route path="recovery" element={<AthleteRecoveryPage />} />
+        </Route>
         <Route
           path="/planning"
           element={

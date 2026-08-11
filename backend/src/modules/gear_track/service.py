@@ -10,6 +10,7 @@ from src.modules.athlete_profile.models import Sport
 from src.modules.coaching.relations import (
     COACH_ATHLETE_NOT_LINKED_STATUS,
     coach_athlete_relation_error,
+    get_active_coach_athlete_relation,
 )
 from src.modules.gear_track.models import (
     Activity,
@@ -481,13 +482,18 @@ class GearTrackService:
             "activity": _activity_to_json(activity, include_shoes=True, include_gear=True),
         }, None, 201
 
+    def _can_access_activity(self, user_id: int, activity: Activity) -> bool:
+        if activity.user_id == user_id:
+            return True
+        return get_active_coach_athlete_relation(self.db, user_id, activity.user_id) is not None
+
     def get_activity(self, user_id: int, activity_id: int) -> tuple[dict | None, str | None, int]:
         activity = self.db.scalar(
             select(Activity)
             .options(joinedload(Activity.sport), joinedload(Activity.activity_type))
-            .where(Activity.id == activity_id, Activity.user_id == user_id)
+            .where(Activity.id == activity_id)
         )
-        if not activity:
+        if not activity or not self._can_access_activity(user_id, activity):
             return None, "Activity not found", 404
         return {
             "success": True,

@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
 import { inviteAthlete, searchUsers, type SearchUser } from "../coaching/api";
+import { SectionBox } from "../shared/PageChrome";
 
 export function InviteAthleteForm() {
   const [query, setQuery] = useState("");
@@ -48,9 +49,10 @@ export function InviteAthleteForm() {
   }
 
   return (
-    <div className="card stack">
-      <h3>Invite athlete</h3>
-      <p className="muted">Search by name or username. Invitations must be accepted by the athlete.</p>
+    <SectionBox label="Invite athlete" note="Search by name or username">
+      <p className="mb-2 text-sm text-slate-500">
+        Invitations must be accepted by the athlete before they appear on your roster.
+      </p>
       <form className="stack" onSubmit={onSubmit}>
         <label>
           Search
@@ -84,6 +86,6 @@ export function InviteAthleteForm() {
       )}
       {message && <p className="success">{message}</p>}
       {error && <p className="error">{error}</p>}
-    </div>
+    </SectionBox>
   );
 }
