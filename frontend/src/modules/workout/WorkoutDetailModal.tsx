@@ -11,13 +11,24 @@ type WorkoutDetailModalProps = {
     onEdit: () => void;
     onDelete: () => void;
   };
+  athleteActions?: {
+    onComplete: () => void;
+    onSkip: () => void;
+  };
+  actionError?: string | null;
 };
 
 function formatWorkoutType(type: string): string {
   return type.replace(/_/g, " ");
 }
 
-export function WorkoutDetailModal({ workout, onClose, coachActions }: WorkoutDetailModalProps) {
+export function WorkoutDetailModal({
+  workout,
+  onClose,
+  coachActions,
+  athleteActions,
+  actionError,
+}: WorkoutDetailModalProps) {
   const steps = workout.steps as WorkoutStepItem[] | null;
   const previewLines = formatWorkoutPreview(steps, workout.sport_code, false);
   const sportLabel = workout.sport_name ?? workout.sport_code;
@@ -85,6 +96,29 @@ export function WorkoutDetailModal({ workout, onClose, coachActions }: WorkoutDe
             )}
           </div>
         )}
+
+        {athleteActions && workout.status === "scheduled" && (
+          <div className="workout-detail-actions row-between">
+            <button
+              type="button"
+              onClick={() => {
+                athleteActions.onComplete();
+              }}
+            >
+              Mark complete
+            </button>
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => {
+                athleteActions.onSkip();
+              }}
+            >
+              Skip
+            </button>
+          </div>
+        )}
+        {actionError && <p className="muted">{actionError}</p>}
 
         {coachActions && (
           <div className="workout-detail-actions row-between">

@@ -260,7 +260,7 @@ def process_activity_create(owner_id: int, object_id: int) -> None:
                     default_gear.value_covered = round(float(total), 2)
 
             try_link_activity_to_workout(
-                db, us.user_id, activity.id, date, sport_code
+                db, us.user_id, activity.id, date, sport_code, sport_id=activity.sport_id
             )
 
             db.commit()

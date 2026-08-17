@@ -1,6 +1,8 @@
 """Per-occurrence scoring with intent-asymmetric penalties."""
 from __future__ import annotations
 
+from collections.abc import Iterable
+
 from src.modules.execution.domain import (
     ExecutionMetrics,
     ExecutionScore,
@@ -164,3 +166,15 @@ def score_occurrence(
             "weights": "equal_non_null",
         },
     )
+
+
+def aggregate_execution_score(step_scores: Iterable[float | None]) -> float | None:
+    """Session-level score: mean of non-null per-step scores, rounded to 1 decimal.
+
+    Returns None when no step was scored. This is the single definition used by
+    the WorkoutExecution API and the training calendar.
+    """
+    parts = [score for score in step_scores if score is not None]
+    if not parts:
+        return None
+    return round(sum(parts) / len(parts), 1)

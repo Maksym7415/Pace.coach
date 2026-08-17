@@ -61,6 +61,9 @@ class Workout(Base):
     sport_id: Mapped[int | None] = mapped_column(
         ForeignKey("sports.id", ondelete="SET NULL"), nullable=True, index=True
     )
+    slot_ordinal: Mapped[int] = mapped_column(
+        Integer(), nullable=False, default=0, server_default="0"
+    )
 
     created_at: Mapped[datetime | None] = mapped_column(default=datetime.utcnow)
     updated_at: Mapped[datetime | None] = mapped_column(

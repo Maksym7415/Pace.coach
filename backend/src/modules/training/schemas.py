@@ -26,6 +26,7 @@ class WorkoutWriteRequest(WorkoutIntentMixin):
 
     scheduled_date: date
     sport_id: int = Field(..., ge=1)
+    slot_ordinal: int = Field(0, ge=0)
     workout_type: WorkoutType = WorkoutType.easy
     title: str = Field(..., min_length=1, max_length=255)
     description: str | None = None
@@ -49,6 +50,7 @@ class WorkoutAssignRequest(WorkoutIntentMixin):
     athlete_ids: list[int] = Field(..., min_length=1)
     scheduled_dates: list[date] = Field(..., min_length=1)
     sport_id: int = Field(..., ge=1)
+    slot_ordinal: int = Field(0, ge=0)
     workout_type: WorkoutType = WorkoutType.easy
     title: str = Field(..., min_length=1, max_length=255)
     description: str | None = None
@@ -95,3 +97,7 @@ class WorkoutTemplateWriteRequest(WorkoutIntentMixin):
 
 class WorkoutCompleteRequest(BaseModel):
     notes: str | None = None
+
+
+class WorkoutLinkActivityRequest(BaseModel):
+    activity_id: int = Field(..., ge=1)

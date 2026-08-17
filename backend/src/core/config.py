@@ -83,3 +83,7 @@ STRAVA_WEBHOOK_CALLBACK_PATH = os.environ.get(
     "STRAVA_WEBHOOK_CALLBACK_PATH",
     "/api/webhooks/strava",
 )
+
+SUPABASE_URL = _require_env("SUPABASE_URL")
+SUPABASE_SERVICE_ROLE_KEY = _require_env("SUPABASE_SERVICE_ROLE_KEY")
+ACTIVITY_STORAGE_BUCKET = os.environ.get("ACTIVITY_STORAGE_BUCKET", "activity-files")

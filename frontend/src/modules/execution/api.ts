@@ -7,6 +7,13 @@ export async function getWorkoutExecution(activityId: number) {
   );
 }
 
+export async function rematchWorkoutExecution(activityId: number) {
+  return apiPost<{ workout_execution: WorkoutExecution }>(
+    `/api/activities/${activityId}/workout-execution/rematch`,
+    {},
+  );
+}
+
 export type AthleteIssueResponsePayload = {
   issue_id: number;
   reason?: string | null;

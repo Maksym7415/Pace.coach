@@ -12,7 +12,6 @@ import type { Workout } from "../training/api";
 import {
   displayStatusForActivity,
   displayStatusForWorkout,
-  HARDCODED_EXECUTION_SCORE,
   STATUS_BADGE_LABEL,
   type CalendarDisplayStatus,
 } from "./eventStatus";
@@ -58,6 +57,7 @@ type PopupView = {
   status: CalendarDisplayStatus;
   activityId: number | null;
   workout: Workout | null;
+  executionScore: number | null;
 };
 
 function toView(item: CalendarPopupItem, today: string): PopupView {
@@ -72,6 +72,7 @@ function toView(item: CalendarPopupItem, today: string): PopupView {
       status: displayStatusForActivity(),
       activityId: a.id,
       workout: null,
+      executionScore: null,
     };
   }
   const w = item.workout;
@@ -84,6 +85,7 @@ function toView(item: CalendarPopupItem, today: string): PopupView {
     status: displayStatusForWorkout(w, today),
     activityId: w.activity_id,
     workout: w,
+    executionScore: w.execution_score,
   };
 }
 
@@ -110,7 +112,7 @@ export function CalendarEventPopup({
 
   const view = toView(item, today);
   const { Icon, label: sportLabel } = sportMeta(view.sportCode);
-  const showScore = view.status === "completed";
+  const showScore = view.executionScore != null;
   const canOpenActivity = view.activityId != null;
   const canOpenWorkout = view.workout != null;
 
@@ -217,7 +219,7 @@ export function CalendarEventPopup({
           {showScore && (
             <div className="calendar-event-popup-row">
               <span className="muted">Execution score</span>
-              <span className="font-medium">{HARDCODED_EXECUTION_SCORE}%</span>
+              <span className="font-medium">{view.executionScore}%</span>
             </div>
           )}
         </div>

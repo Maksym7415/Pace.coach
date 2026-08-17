@@ -3,7 +3,7 @@
 > Technical reference for the structured workout execution system: how a FIT file becomes a
 > step-by-step comparison of planned versus actual training.
 >
-> Last verified against code: **2026-08-13**, branch `development` @ `f4886cb`.
+> Last verified against code: **2026-08-17** (M0 landed).
 > Product context: [`product-roadmap.md`](./product-roadmap.md).
 
 Audience: an engineer or AI agent who needs to modify this system without reverse-engineering
@@ -19,6 +19,7 @@ Module root: `backend/src/modules/execution/`.
 POST /api/activities/import/fit                    activity_import/router.py
   │
   ├─ StoredFile (SHA-256 key)  +  ActivityImport(status="pending")
+  │     LocalFilesystemStorage (dev) or SupabaseStorage (production)
   │
   └─ BackgroundTasks → _process_import              activity_import/service.py
        │
@@ -33,10 +34,17 @@ POST /api/activities/import/fit                    activity_import/router.py
        │
        ├─ try_link_activity_to_workout()             training/activity_link.py
        │     └─ sets workout.activity_id, status=completed, completed_at
+       │        (exactly one eligible same-day candidate after sport_id filter)
        │
        └─ if linked is not None and linked.steps:
              ExecutionMatchingService(db).match_from_normalized(...)
                                                      execution/service.py
+
+POST /api/training/workouts/{id}/link-activity     training/router.py
+  └─ rematch_workout_activity() → match_persisted()
+
+POST /api/activities/{id}/workout-execution/rematch  execution/router.py
+  └─ rematch_workout_activity() → match_persisted()
 ```
 
 Then, on read:
@@ -48,20 +56,26 @@ GET /api/activities/{activity_id}/workout-execution   execution/router.py
   → PlannedVsActual.tsx  /  WorkoutReviewDrawer.tsx
 ```
 
-### The only trigger
+### Matching triggers
 
-`ExecutionMatchingService` is invoked from exactly one place in the codebase:
-`activity_import/service.py`, inside the FIT-import background job, and only when
-`try_link_activity_to_workout` returns a workout that has `steps`.
+`ExecutionMatchingService` is invoked from three places:
 
-Consequences:
+1. **FIT import auto-link** — `activity_import/service.py` calls `match_from_normalized` when
+   `try_link_activity_to_workout` returns a workout that has `steps`. Auto-link still requires
+   exactly one eligible same-day candidate (sport-filtered; never guesses).
+2. **Manual link** — `POST /api/training/workouts/{id}/link-activity` calls
+   `rematch_workout_activity` → `match_persisted`.
+3. **Re-match** — `POST /api/activities/{id}/workout-execution/rematch` uses the same helper.
+
+`rematch_workout_activity` refuses to persist an unmatched row when the activity has no
+`start_time` or no laps/streams (422). `_run` still only flushes; the helper commits.
+
+Consequences that remain:
 
 - Strava's webhook and manual activity creation both call `try_link_activity_to_workout` but
-  **never** call `ExecutionMatchingService`.
-- `match_persisted()` — which rebuilds evidence from persisted rows and would allow re-matching
-  — is fully implemented and **has zero callers**.
-- The matching failure is silent: the call is wrapped in `try/except Exception` with
-  `logger.exception`, so import still reports success.
+  **never** call `ExecutionMatchingService`. Re-match on those activities returns 422.
+- Matching errors inside the FIT import job are still wrapped in `try/except Exception` with
+  `logger.exception`, so import still reports success. Manual rematch surfaces the error.
 
 ---
 
@@ -104,7 +118,7 @@ Two producers, both in `execution/adapters/garmin.py`:
 
 - `GarminEvidenceAdapter.adapt(normalized)` — the import path, from parser output.
 - `activity_evidence_from_persisted(...)` — the recompute path, from DB rows (used by
-  `_load_evidence`, itself only reachable via the uncalled `match_persisted`).
+  `_load_evidence` via `match_persisted`, which `rematch_workout_activity` wraps).
 
 `EvidenceCapability` values: `device_step_index`, `device_plan`, `lap_structure`, `timeline`,
 `heart_rate`, `pace`, `power`, `cadence`.
@@ -429,20 +443,20 @@ Frontend consumers: `frontend/src/modules/execution/` — `PlannedVsActual.tsx`,
 
 | # | Limitation | Detail |
 |---|---|---|
-| 1 | Matching has exactly one trigger | Only the FIT-import background job. Strava and manual activity creation link workouts without ever matching. |
-| 2 | Linking is narrow and unrecoverable | `try_link_activity_to_workout` requires **exactly one** eligible `scheduled` workout with `activity_id IS NULL` on the same calendar date. No time-of-day window; no check that the workout's sport matches the activity's. Zero or two candidates → no execution, permanently. |
-| 3 | No manual link and no re-match API | `match_persisted()` and `_load_evidence()` are written and unused. |
-| 4 | Production FIT storage unconfigured | `create_app()` wires a provider only when `not IS_PRODUCTION`, and `LocalFilesystemStorage` is the only implementation. |
+| 1 | Strava and manual activity creation still do not match | They call `try_link_activity_to_workout` but never `ExecutionMatchingService`. Re-match on those activities returns 422 (no laps/streams). |
+| 2 | Auto-link still refuses to guess | Exactly one eligible same-day `scheduled` workout after sport_id filter. Two same-sport sessions on one day remain unlinked until `POST .../link-activity`. |
+| 3 | Manual link UI is API-first | Endpoints exist; athlete/coach pickers are not wired. |
+| 4 | Matching still in-process | FIT import uses FastAPI `BackgroundTasks`. A real job runner is an M3 prerequisite. |
 | 5 | Snapshot timing | Created at match time from the live plan, not at assignment. |
 | 6 | Nested repeats blocked at authoring | Resolver supports them; `RepeatBlockModel` prevents them. |
 | 7 | Sport coverage | Running is first-class. Cycling reuses the running extractor minus running-dynamics keys, with no dedicated tests. Swimming and strength appear only as catalog key names. Unknown sports silently fall back to the running extractor. |
 | 8 | Elevation ignored | `altitude` is loaded into the timeline and never used by any extractor or score. |
-| 9 | No execution-level metrics | Only per-step rows. `overall_confidence` measures match certainty, not performance. Nothing aggregates a whole session. |
+| 9 | Session score is derived on read | `aggregate_execution_score` means non-null step scores. There is still no stored session-level metrics blob. `overall_confidence` measures match certainty, not performance. |
 | 10 | `insights.py` unreachable | No route exposes `get_insights`. |
 | 11 | `ManualStrategy` unregistered | Absent from `default_registry()`. |
 | 12 | Dead enum values | `WorkoutExecutionStatus.pending`/`.failed`, `StepExecutionStatus.partially_executed`/`.substituted`. |
-| 13 | Silent failure | Matching errors are caught and logged inside the import job; the import still reports success. |
-| 14 | No integration test | `_run`, persistence, and the import hook have no end-to-end coverage. Unit coverage of resolution, segmentation, metrics, scoring and serialization is strong. Two tests depend on a machine-specific FIT path and skip when absent. |
+| 13 | Silent failure on import | Matching errors are caught and logged inside the import job; the import still reports success. Manual rematch surfaces the error. |
+| 14 | No FIT-import end-to-end test | Persistence tests cover link, rematch, auto-link, and score aggregation. The import hook itself is not covered. Two matching tests depend on a machine-specific FIT path and skip when absent. |
 
 ---
 
@@ -491,3 +505,7 @@ Violating any of these breaks the system in ways that are hard to detect. Preser
     and registry order is priority order.
 
 12. **Matching failure must never fail an import.** A parsed activity is valuable on its own.
+
+13. **Unlink never destroys execution history.** Clearing `workout.activity_id` must not delete
+    `WorkoutExecution` rows. `get_for_activity` is scoped to executions whose workout still
+    points at that activity, so a stale execution is hidden and recoverable by re-linking.

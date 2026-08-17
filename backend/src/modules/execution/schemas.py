@@ -81,6 +81,7 @@ class WorkoutExecutionOut(BaseModel):
     status: str
     overall_confidence: float | None = None
     algorithm_version: str
+    execution_score: float | None = None
     issue_count: int
     responded_issue_count: int = 0
     workout: WorkoutStubOut

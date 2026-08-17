@@ -3,8 +3,6 @@ import { toDateKey } from "../shared/dates";
 
 export type CalendarDisplayStatus = "completed" | "planned" | "missed";
 
-export const HARDCODED_EXECUTION_SCORE = 87;
-
 export const STATUS_LEGEND: {
   id: CalendarDisplayStatus;
   label: string;

@@ -3,7 +3,7 @@
 > **Canonical source of truth** for product direction, current state, and implementation
 > sequencing. Living document — update it in the same PR that changes the reality it describes.
 >
-> Last verified against code: **2026-08-13**, branch `development` @ `f4886cb`.
+> Last verified against code: **2026-08-17** (M0 landed).
 > Companion document: [`execution-architecture.md`](./execution-architecture.md).
 
 ## Status legend
@@ -86,9 +86,9 @@ today cannot be recovered later.
 
 | Area | Status | Reality |
 |---|---|---|
-| Today | `PARTIAL` | Real recovery check-in, today's workout, 7-day strip, recent activities, FIT upload. The "AI insight" block is static text. |
-| Calendar | `PARTIAL` | Month calendar on `/activities` backed by `/api/training/calendar` is real. No dedicated weekly view. Event popup shows a **hardcoded** execution score. |
-| Planned workouts | `PARTIAL` | Read path fully wired. Athlete **cannot mark complete or skip from the UI** — `PUT /workouts/{id}/complete` and `/skip` exist and are called by nothing. |
+| Today | `PARTIAL` | Real recovery check-in, today's workout, 7-day strip, recent activities, FIT upload. Scheduled workouts can be marked complete or skipped from the workout detail modal. The "AI insight" block is static text. |
+| Calendar | `PARTIAL` | Month calendar on `/activities` backed by `/api/training/calendar` is real. No dedicated weekly view. Event popup shows the backend-derived `execution_score` when one exists. |
+| Planned workouts | `DONE` | Read path fully wired. Athlete can mark complete or skip from Today (`PUT /workouts/{id}/complete` and `/skip`), only while status is `scheduled`. |
 | Activities | `DONE` | List + calendar, date-ranged, real API, links to detail. |
 | Activity detail | `PARTIAL` | Summary and execution sections real. Charts, zone distribution, insights and coach notes are placeholders. |
 | Planned vs Actual | `DONE` | `PlannedVsActual.tsx` renders real `WorkoutExecution` data — when an execution exists. |
@@ -111,13 +111,13 @@ today cannot be recovered later.
 
 | Area | Status | Reality |
 |---|---|---|
-| FIT import | `PARTIAL` | Upload → parse → persist works in development. **A storage provider is only configured when `not IS_PRODUCTION`, and `LocalFilesystemStorage` is the only implementation — FIT upload cannot work in production.** |
+| FIT import | `DONE` | Upload → parse → persist. Production uses `SupabaseStorage`; development uses `LocalFilesystemStorage`. Matching still runs in-process via `BackgroundTasks`. |
 | Activity laps | `DONE` | Full lap rows persisted including `wkt_step_index`, `lap_trigger`, `intensity`, `message_index`. |
-| Workout matching | `PARTIAL` | The engine is real and good. It is only ever invoked from inside the FIT-import background job, and only when same-day auto-linking is unambiguous. No manual link, no re-match. |
-| `WorkoutExecution` | `DONE` | Real persistence, idempotent per `(workout_id, activity_id, algorithm_version)`. |
+| Workout matching | `PARTIAL` | Engine is real. Triggers: FIT-import auto-link (unambiguous same-day + sport), `POST .../link-activity`, and `POST .../workout-execution/rematch`. Strava activities still cannot be matched (no laps/streams). |
+| `WorkoutExecution` | `DONE` | Real persistence, idempotent per `(workout_id, activity_id, algorithm_version)`. Unlink hides an execution without deleting it. |
 | `WorkoutStepExecution` | `DONE` | One row per planned occurrence, keyed `(authored_step_id, occurrence_ordinal)`. |
 | `ExecutionIssue` | `DONE` | 8 issue codes with real detection rules and thresholds. |
-| Execution scoring | `PARTIAL` | Backend scoring is real (completion / intensity adherence / execution quality). The calendar UI displays `HARDCODED_EXECUTION_SCORE = 87` instead of the real value. |
+| Execution scoring | `DONE` | Per-step scores plus a session aggregate (`aggregate_execution_score`: mean of non-null step scores, 1 decimal) exposed on `WorkoutExecutionOut` and the training calendar. Unscored sessions show no score. |
 | Workout Review | `DONE` (data path) | Consumes real execution data via `GET /api/activities/{id}/workout-execution`. |
 
 ---
@@ -133,7 +133,7 @@ pace.coach/
 │   ├── src/core/             auth (JWT), config, database, responses, rate_limit
 │   ├── src/models.py         imports every ORM model for Alembic metadata
 │   ├── src/modules/          feature modules (see below)
-│   ├── migrations/versions/  Alembic chain, head = x1a2b3c4d5e6
+│   ├── migrations/versions/  Alembic chain, head = y2b3c4d5e6f7
 │   └── tests/
 ├── frontend/         React 19 + Vite 6 + TypeScript, React Router v7, Tailwind 4
 └── docs/
@@ -229,16 +229,16 @@ See [`execution-architecture.md`](./execution-architecture.md).
 ## 4. Execution architecture (summary)
 
 ```
-FIT upload
-  → parsing (FitParser)
+FIT upload  or  POST /api/training/workouts/{id}/link-activity
+  → parsing (FitParser) [FIT path only]
   → Activity
   → ActivityLap / ActivityTrackPoint
-  → workout linking (try_link_activity_to_workout)
+  → workout linking (auto or manual)
+  → ExecutionMatchingService (match_from_normalized or match_persisted)
   → WorkoutExecution
   → WorkoutStepExecution
   → ExecutionIssue
-  → Planned vs Actual (UI)
-  → Workout Review (UI)
+  → Planned vs Actual (UI) / calendar execution_score / Workout Review (UI)
 ```
 
 ### Concepts that are true today
@@ -255,16 +255,16 @@ FIT upload
 - **Execution issues already exist** — 8 codes across 5 dimensions with real thresholds.
 - **Workout Review already consumes real execution data** and persists athlete responses.
 
-### Weak points (do not fix in this task)
+### Weak points remaining after M0
 
 | Weak point | Consequence |
 |---|---|
-| Matching triggered only through the narrow automatic linking path | `try_link_activity_to_workout` requires **exactly one** eligible `scheduled` workout on the same calendar date. Zero or two candidates → no execution, ever. |
-| No manual activity ↔ workout link | A failed or wrong auto-link is unrecoverable through the product. |
-| No re-match endpoint | `match_persisted()` is written and has zero callers. Re-running matching requires a developer. |
-| Production FIT storage not configured | `create_app()` configures storage only when `not IS_PRODUCTION`; the only provider is local filesystem. FIT upload is non-functional in production. |
+| Auto-link still returns `None` when two same-sport workouts share a day | Recoverable via `POST .../link-activity` (no silent guessing). |
+| Strava activities have no laps or streams | Re-match returns 422 instead of a silent unmatched row. |
+| Matching still runs in-process via `BackgroundTasks` | A real job runner remains an M3 prerequisite. |
 | Plan snapshot created at match time, not assignment time | `WorkoutPlanSnapshot` is built from the **live** `workout.steps` when matching runs. Historical protection actually comes from workouts being uneditable once status leaves `scheduled`, not from the snapshot itself. |
 | Nested repeats blocked by authoring validation | `RepeatBlockModel.steps` is typed `list[WorkoutStepModel]`, so a repeat can never contain a repeat — even though the resolver handles nesting. |
+| Manual link UI is API-first | Recovery is operator-driven via the endpoint unless a later slice wires athlete/coach UI. |
 
 ---
 
@@ -277,7 +277,7 @@ User ──< UserRole (athlete | coach)
   │
   ├──< CoachAthleteRelation (pending | active | revoked | rejected; permissions JSON [unused])
   │
-  ├──< Workout (athlete_id, scheduled_date, workout_type, steps JSON, status, activity_id?)
+  ├──< Workout (athlete_id, scheduled_date, slot_ordinal, workout_type, steps JSON, status, activity_id?)
   │       ├──< WorkoutPlanSnapshot (resolved_plan JSON)
   │       └──< WorkoutExecution ──< WorkoutStepExecution
   │                              └──< ExecutionIssue (+ athlete_reason / notes / responded_at)
@@ -299,7 +299,7 @@ User (coach) ──< WorkoutTemplate (steps JSON — no FK from Workout back to 
 |---|---|
 | `User` | `users`. Roles in a separate table; a user may be both athlete and coach. |
 | `CoachAthleteRelation` | Unique `(coach_id, athlete_id)`. Only `status = 'active'` grants access. |
-| `Workout` | The single scheduled, executable unit. Editable only while `scheduled`. |
+| `Workout` | The single scheduled, executable unit. Editable only while `scheduled`. `slot_ordinal` orders multiple sessions on the same date; it does not make auto-link pick a winner. |
 | `WorkoutTemplate` | Coach-owned reusable structure. **No lineage** — `templateStepId` exists in the schema and nothing populates it. |
 | `WorkoutPlanSnapshot` | `resolved_plan` JSON = `ResolvedPlan` (tree + flat occurrences). Written at match time. |
 | `Activity` | Defined in the `gear_track` module. Unique per import; partial unique on `(user_id, strava_activity_id)`. |
@@ -345,34 +345,45 @@ These are **`MISSING`**, not partial. Nothing in the schema represents them:
 
 ## 6. Roadmap
 
-### M0 — Execution Loop Integrity · `NEXT`
+### M0 — Execution Loop Integrity · `DONE`
 
 **Goal:** make the existing plan → execute → match → review loop reliable enough for real
 beta usage. Nothing here is a new feature; it finishes what is already built.
 
-**Scope**
+**Shipped**
 
 | Item | Note |
 |---|---|
-| Production FIT storage | Implement a cloud `StorageProvider` and configure it when `IS_PRODUCTION`. Hard blocker — nothing else in the loop runs in production without it. |
-| Manual activity ↔ workout link / unlink | Recovers every ambiguous or missed auto-link. |
-| Re-match endpoint | Expose the already-written `match_persisted()`. |
-| Trigger matching when an activity is linked | So "athlete uploaded before the coach assigned" recovers. |
-| Workout slot ordering | A `slot_ordinal` on `Workout` to address multiple workouts on the same day, and a linking rule that uses it. |
-| Remove hardcoded execution score | Delete `HARDCODED_EXECUTION_SCORE` and surface the real score in the calendar. |
-| Wire athlete complete / skip UI | The endpoints exist and are called by nothing. |
+| Production FIT storage | `SupabaseStorage` over `requests`. `build_storage_provider()` returns it in production and `LocalFilesystemStorage` otherwise. Config: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `ACTIVITY_STORAGE_BUCKET` (default `activity-files`). |
+| Manual activity ↔ workout link / unlink | `POST`/`DELETE /api/training/workouts/{id}/link-activity`. No silent overwrite; an activity cannot be linked twice. Unlink never deletes executions. |
+| Re-match endpoint | `POST /api/activities/{id}/workout-execution/rematch` wraps `match_persisted()` with preconditions and an explicit commit. |
+| Matching on link | Manual link and rematch share `rematch_workout_activity`. FIT import still uses `match_from_normalized`. |
+| `Workout.slot_ordinal` | `INTEGER NOT NULL DEFAULT 0`. Calendar orders by `(scheduled_date, slot_ordinal, id)`. Auto-link orders candidates the same way but still returns `None` when more than one is eligible. |
+| Safer auto-link | Candidates whose `sport_id` is set and differs from the activity are dropped. Null `sport_id` stays eligible. |
+| Real execution score | `aggregate_execution_score` is the single session definition (mean of non-null step scores, 1 decimal). Calendar and `WorkoutExecutionOut` both use it. `HARDCODED_EXECUTION_SCORE` is gone. |
+| Athlete complete / skip UI | `WorkoutDetailModal` `athleteActions` on Today, scheduled workouts only. |
+
+**Decisions recorded in M0**
+
+- Storage is Supabase Storage, not GCS/S3. `object_key` stays `fit-uploads/{sha256}.fit`.
+- Session score is derived on read; there is no `WorkoutExecution.score` column.
+- `slot_ordinal` does **not** make auto-link guess. Ambiguity is recovered by manual link.
+- Unlink preserves history: `get_for_activity` only returns executions whose workout still points at that activity.
+
+**Remaining limitations after M0**
+
+- Manual link is API-first; athlete/coach UI for picking an activity is not wired.
+- Strava activities still cannot be matched (no laps or streams); rematch says so with 422.
+- Matching still runs in-process via `BackgroundTasks`; a real job runner remains an M3 prerequisite.
+- SQLite test fixture is not byte-identical to Postgres (partial unique indexes degrade to plain unique indexes).
 
 **Acceptance criterion**
 
 An athlete and coach can complete
 `Plan → Run → Upload FIT → Match → Planned vs Actual → Review`
-without developer intervention.
+without developer intervention. Ambiguous same-day sessions recover via the link API plus rematch.
 
-**Why this precedes M2:** the cycle builder's purpose is to schedule structured training in
-volume, including double days. Every double day produces two same-day candidates, which makes
-`try_link_activity_to_workout` return `None`, which means no execution and no review — and
-without a manual link or re-match, that failure is permanent per activity. Building M2 first
-would generate more planned workouts feeding a matcher that silently drops them.
+Double days used to make auto-link return `None` permanently; that was why M0 had to land before the cycle builder.
 
 ---
 
@@ -536,7 +547,7 @@ exist when M5 arrives.
 ## 7. Dependency graph
 
 ```
-                      M0 — Execution Loop Integrity   [NEXT]
+                      M0 — Execution Loop Integrity   [DONE]
                                     │
               ┌─────────────────────┼─────────────────────┐
               │                     │                     │
@@ -554,8 +565,7 @@ exist when M5 arrives.
 
 Notes:
 
-- **M0 gates everything.** M1, M2, and M3 are mutually independent once M0 lands and may be
-  reordered or parallelized.
+- **M0 is done.** M1, M2, and M3 are mutually independent and may be reordered or parallelized.
 - **M1 is a parallel foundation, not a blocker for M2/M3.** It feeds M5 directly: without
   coach responses and outcomes, the AI has no coaching history to retrieve.
 - **M4 requires both M2 and M3** — trends need metrics, and interpreting them needs plan
@@ -587,15 +597,11 @@ Not decided in this task. Each one changes scope downstream.
 
 ## 9. Technical debt
 
-Discovered during the 2026-08-13 audit. **Not fixed in this task.**
+Discovered during the 2026-08-13 audit. Items 1–5 (production storage, hardcoded score,
+narrow auto-link, missing manual link, missing re-match) were fixed in M0.
 
 | # | Item | Impact |
 |---|---|---|
-| 1 | Production FIT storage not configured | **Critical.** Storage provider is wired only when `not IS_PRODUCTION`; the only implementation is `LocalFilesystemStorage`. FIT upload cannot work in production. |
-| 2 | Hardcoded execution score | `HARDCODED_EXECUTION_SCORE = 87` in `frontend/src/modules/calendar/eventStatus.ts`, rendered in the calendar event popup while a real score exists in the database. |
-| 3 | Narrow automatic activity linking | `try_link_activity_to_workout` needs exactly one eligible same-day `scheduled` workout. No time-of-day window, no sport check against the workout. |
-| 4 | No manual activity ↔ workout link | Failed or incorrect auto-links are unrecoverable through the product. |
-| 5 | No re-match endpoint | `match_persisted()` is fully implemented with zero callers. |
 | 6 | Legacy shoe-tracker naming and structure | JWT issuer `shoe-tracker-backend`, audience `shoe-tracker-api`, DB defaults `shoe_tracker`; the `Activity` model lives in `gear_track`; live `/api/shoes` routes; `docs/SHOE_TRACKER_APP_PLAN.md` and `docs/update_gear_schema.md` describe a different product. |
 | 7 | Stale module READMEs | `training/`, `coaching/`, and `recovery/` READMEs all say "Scaffold only — implementation deferred" for fully implemented modules. The root `README.md` repeats the claim. Actively misleading to agents. |
 | 8 | No CI | No workflow config anywhere in the repository. Tests run only locally. |
@@ -604,7 +610,7 @@ Discovered during the 2026-08-13 audit. **Not fixed in this task.**
 | 11 | Unreachable execution code | `insights.py` (the whole confidence-gating layer) has no route; `get_insights` has no caller; `WorkoutExecutionStatus.pending` / `.failed` and `StepExecutionStatus.partially_executed` / `.substituted` are never emitted. |
 | 12 | `ManualStrategy` not registered | Fully implemented segmentation strategy absent from `default_registry()` — free capability once a UI exists. |
 | 13 | Mock athlete context in coach UI | `coach/athlete/mockAthleteContext.ts` supplies fake mesocycle and trend data to the coach workspace and athlete roster. |
-| 14 | No full execution integration test | `ExecutionMatchingService._run`, DB persistence, and the import hook have no end-to-end test. `detect_issues` is imported by the test module but never exercised. Strong unit coverage otherwise. |
+| 14 | No full FIT-import execution integration test | Persistence tests cover manual link, rematch idempotency, auto-link, and score aggregation. The FIT import hook itself still has no end-to-end test. `detect_issues` is imported by the matching test module but never exercised. |
 | 15 | Row-by-row track point inserts | One `db.add()` per FIT record — thousands per import. No `(activity_id, timestamp)` composite index. |
 | 16 | Unused schema | `coach_athlete_relations.permissions` (stored, returned, never enforced) and `workout_executions.extra_work` (never written). |
 | 17 | Orphaned frontend components | `CreateWorkoutForm`, `EditWorkoutModal`, `CoachMonthCalendar`, and the legacy `WorkoutBuilder` have no route and no live importer. |

@@ -1,6 +1,7 @@
 """Orchestrates the execution matching pipeline and read API."""
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from typing import Any
 
@@ -42,7 +43,7 @@ from src.modules.execution.schemas import (
     WorkoutExecutionOut,
     WorkoutStubOut,
 )
-from src.modules.execution.scoring import score_occurrence
+from src.modules.execution.scoring import aggregate_execution_score, score_occurrence
 from src.modules.execution.segmentation.device_step_index import DeviceStepIndexStrategy
 from src.modules.execution.segmentation.lap_structure import LapStructureStrategy
 from src.modules.execution.segmentation.registry import SegmentationRegistry
@@ -50,6 +51,8 @@ from src.modules.execution.segmentation.signal import SignalSegmentationStrategy
 from src.modules.fit_parser.models import DeviceWorkout, FitEvent, NormalizedActivity, TrackPoint
 from src.modules.gear_track.models import Activity
 from src.modules.training.models import Workout
+
+logger = logging.getLogger("coach_app.execution")
 
 
 def default_registry() -> SegmentationRegistry:
@@ -382,11 +385,84 @@ class ExecutionMatchingService:
         )
 
 
+def rematch_workout_activity(
+    db: Session,
+    *,
+    workout_id: int,
+    activity_id: int,
+    commit: bool = True,
+) -> tuple[WorkoutExecution | None, str | None, int]:
+    """Re-run matching from persisted laps/streams for a linked pair.
+
+    Preconditions fail with a useful error instead of persisting an unmatched
+    execution. Callers that already hold a pending workout/activity write can
+    pass commit=False and commit themselves.
+    """
+    workout = db.get(Workout, workout_id)
+    if workout is None:
+        return None, "Workout not found", 404
+    if not workout.steps:
+        return None, "Workout has no structured steps to match", 400
+
+    activity = db.get(Activity, activity_id)
+    if activity is None:
+        return None, "Activity not found", 404
+    if activity.start_time is None:
+        return None, "Activity is missing a start time and cannot be matched", 422
+
+    has_lap = db.scalar(
+        select(ActivityLap.id).where(ActivityLap.activity_id == activity_id).limit(1)
+    )
+    has_point = db.scalar(
+        select(ActivityTrackPoint.id).where(ActivityTrackPoint.activity_id == activity_id).limit(1)
+    )
+    if has_lap is None and has_point is None:
+        return None, "Activity has no lap or stream data to match against", 422
+
+    try:
+        execution = ExecutionMatchingService(db).match_persisted(
+            workout_id=workout_id,
+            activity_id=activity_id,
+        )
+    except ValueError as exc:
+        return None, str(exc), 400
+    except Exception:
+        logger.exception(
+            "Execution matching failed for workout %s activity %s",
+            workout_id,
+            activity_id,
+        )
+        return None, "Execution matching failed", 500
+
+    if commit:
+        db.commit()
+    return execution, None, 200
+
+
 class WorkoutExecutionService:
     """Read/write access to persisted WorkoutExecution results."""
 
     def __init__(self, db: Session):
         self.db = db
+
+    def _load_current_execution(self, activity_id: int) -> WorkoutExecution | None:
+        """Most recent execution whose workout is still linked to this activity."""
+        return self.db.scalar(
+            select(WorkoutExecution)
+            .join(Workout, Workout.id == WorkoutExecution.workout_id)
+            .where(
+                WorkoutExecution.activity_id == activity_id,
+                Workout.activity_id == activity_id,
+            )
+            .options(
+                selectinload(WorkoutExecution.step_executions),
+                selectinload(WorkoutExecution.issues),
+                joinedload(WorkoutExecution.plan_snapshot),
+                joinedload(WorkoutExecution.workout).joinedload(Workout.sport),
+            )
+            .order_by(WorkoutExecution.created_at.desc(), WorkoutExecution.id.desc())
+            .limit(1)
+        )
 
     def get_for_activity(
         self, user_id: int, activity_id: int
@@ -398,24 +474,40 @@ class WorkoutExecutionService:
         if not self._can_access_activity(user_id, activity):
             return None, "Activity not found", 404
 
-        execution = self.db.scalar(
-            select(WorkoutExecution)
-            .where(WorkoutExecution.activity_id == activity_id)
-            .options(
-                selectinload(WorkoutExecution.step_executions),
-                selectinload(WorkoutExecution.issues),
-                joinedload(WorkoutExecution.plan_snapshot),
-                joinedload(WorkoutExecution.workout).joinedload(Workout.sport),
-            )
-            .order_by(WorkoutExecution.created_at.desc(), WorkoutExecution.id.desc())
-            .limit(1)
-        )
-
+        execution = self._load_current_execution(activity_id)
         if execution is None:
             return {"workout_execution": None}, None, 200
 
         return {
             "workout_execution": serialize_workout_execution(execution).model_dump(mode="json"),
+        }, None, 200
+
+    def rematch_for_activity(
+        self, user_id: int, activity_id: int
+    ) -> tuple[dict[str, Any] | None, str | None, int]:
+        activity = self.db.get(Activity, activity_id)
+        if activity is None:
+            return None, "Activity not found", 404
+        if not self._can_access_activity(user_id, activity):
+            return None, "Activity not found", 404
+
+        workout = self.db.scalar(
+            select(Workout).where(Workout.activity_id == activity_id)
+        )
+        if workout is None:
+            return None, "Activity is not linked to a workout", 400
+
+        execution, err, status = rematch_workout_activity(
+            self.db, workout_id=workout.id, activity_id=activity_id
+        )
+        if err:
+            return None, err, status
+
+        loaded = self._load_current_execution(activity_id)
+        if loaded is None:
+            return None, "Workout execution not found after rematch", 500
+        return {
+            "workout_execution": serialize_workout_execution(loaded).model_dump(mode="json"),
         }, None, 200
 
     def save_athlete_responses(
@@ -430,18 +522,7 @@ class WorkoutExecutionService:
         if activity.user_id != user_id:
             return None, "Only the athlete can explain execution issues", 403
 
-        execution = self.db.scalar(
-            select(WorkoutExecution)
-            .where(WorkoutExecution.activity_id == activity_id)
-            .options(
-                selectinload(WorkoutExecution.step_executions),
-                selectinload(WorkoutExecution.issues),
-                joinedload(WorkoutExecution.plan_snapshot),
-                joinedload(WorkoutExecution.workout).joinedload(Workout.sport),
-            )
-            .order_by(WorkoutExecution.created_at.desc(), WorkoutExecution.id.desc())
-            .limit(1)
-        )
+        execution = self._load_current_execution(activity_id)
         if execution is None:
             return None, "Workout execution not found", 404
 
@@ -562,6 +643,7 @@ def serialize_workout_execution(execution: WorkoutExecution) -> WorkoutExecution
         status=execution.status,
         overall_confidence=execution.overall_confidence,
         algorithm_version=execution.algorithm_version,
+        execution_score=aggregate_execution_score(s.score for s in step_outs),
         issue_count=sum(len(s.issues) for s in step_outs),
         responded_issue_count=responded,
         workout=WorkoutStubOut(

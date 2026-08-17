@@ -33,6 +33,7 @@ export type WorkoutIntentFields = {
 export type WorkoutWriteInput = WorkoutIntentFields & {
   scheduled_date: string;
   sport_id: number;
+  slot_ordinal?: number;
   workout_type?: WorkoutType;
   title: string;
   description?: string | null;
@@ -49,6 +50,7 @@ export type WorkoutAssignInput = WorkoutIntentFields & {
   athlete_ids: number[];
   scheduled_dates: string[];
   sport_id: number;
+  slot_ordinal?: number;
   workout_type?: WorkoutType;
   title: string;
   description?: string | null;
@@ -68,6 +70,7 @@ export type Workout = {
   athlete_id: number;
   created_by_id: number | null;
   scheduled_date: string;
+  slot_ordinal: number;
   sport_id: number | null;
   sport_code: string | null;
   sport_name: string | null;
@@ -84,6 +87,8 @@ export type Workout = {
   notes: string | null;
   activity_id: number | null;
   linked_activity: ActivitySummary | null;
+  execution_score: number | null;
+  execution_status: string | null;
   created_at: string | null;
   updated_at: string | null;
 };
@@ -146,6 +151,18 @@ export async function completeWorkout(workoutId: number, notes?: string) {
 
 export async function skipWorkout(workoutId: number) {
   return apiPut<{ workout: Workout }>(`/api/training/workouts/${workoutId}/skip`);
+}
+
+export async function linkWorkoutActivity(workoutId: number, activityId: number) {
+  return apiPost<{
+    workout: Workout;
+    workout_execution?: unknown;
+    matching_error?: string;
+  }>(`/api/training/workouts/${workoutId}/link-activity`, { activity_id: activityId });
+}
+
+export async function unlinkWorkoutActivity(workoutId: number) {
+  return apiDelete<{ workout: Workout }>(`/api/training/workouts/${workoutId}/link-activity`);
 }
 
 export async function listWorkoutTemplates() {

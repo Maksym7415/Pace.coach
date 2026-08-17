@@ -12,6 +12,9 @@ from src.modules.coaching.relations import (
     COACH_ATHLETE_NOT_LINKED_STATUS,
     coach_athlete_relation_error,
 )
+from src.modules.execution.enums import ALGORITHM_VERSION
+from src.modules.execution.models import WorkoutExecution, WorkoutStepExecution
+from src.modules.execution.scoring import aggregate_execution_score
 from src.modules.gear_track.models import Activity
 from src.modules.identity.models import User, UserRole, UserRoleEnum
 from src.modules.training.models import Workout, WorkoutStatus, WorkoutTemplate
@@ -44,7 +47,11 @@ class TrainingService:
             "source": activity.source,
         }
 
-    def _workout_to_dict(self, workout: Workout) -> dict:
+    def _workout_to_dict(
+        self,
+        workout: Workout,
+        execution_summary: dict | None = None,
+    ) -> dict:
         linked_activity = None
         if workout.activity_id:
             activity = self.db.scalar(
@@ -61,6 +68,7 @@ class TrainingService:
             "athlete_id": workout.athlete_id,
             "created_by_id": workout.created_by_id,
             "scheduled_date": workout.scheduled_date.isoformat(),
+            "slot_ordinal": getattr(workout, "slot_ordinal", 0),
             "sport_id": workout.sport_id,
             "sport_code": sport.code if sport else None,
             "sport_name": sport.name if sport else None,
@@ -77,6 +85,8 @@ class TrainingService:
             "notes": workout.notes,
             "activity_id": workout.activity_id,
             "linked_activity": linked_activity,
+            "execution_score": execution_summary["score"] if execution_summary else None,
+            "execution_status": execution_summary["status"] if execution_summary else None,
             "created_at": workout.created_at.isoformat() if workout.created_at else None,
             "updated_at": workout.updated_at.isoformat() if workout.updated_at else None,
         }
@@ -229,6 +239,7 @@ class TrainingService:
             steps=fields["steps"],
             duration_min=fields["duration_min"],
             distance_m=fields["distance_m"],
+            slot_ordinal=data.slot_ordinal,
             status=WorkoutStatus.scheduled,
         )
         self.db.add(workout)
@@ -286,6 +297,7 @@ class TrainingService:
                     steps=fields["steps"],
                     duration_min=fields["duration_min"],
                     distance_m=fields["distance_m"],
+                    slot_ordinal=data.slot_ordinal,
                     status=WorkoutStatus.scheduled,
                 )
                 self.db.add(workout)
@@ -331,6 +343,7 @@ class TrainingService:
             return None, err, status
 
         workout.scheduled_date = data.scheduled_date
+        workout.slot_ordinal = data.slot_ordinal
         workout.sport_id = fields["sport_id"]
         workout.workout_type = data.workout_type
         workout.title = data.title
@@ -484,10 +497,157 @@ class TrainingService:
                 Workout.scheduled_date >= start_date,
                 Workout.scheduled_date <= end_date,
             )
-            .order_by(Workout.scheduled_date.asc())
+            .order_by(Workout.scheduled_date.asc(), Workout.slot_ordinal.asc(), Workout.id.asc())
         ).all()
-        result = [self._workout_to_dict(w) for w in workouts]
+        summaries = self._execution_summaries_for_workouts(workouts)
+        result = [
+            self._workout_to_dict(w, execution_summary=summaries.get(w.id))
+            for w in workouts
+        ]
         return {"workouts": result, "count": len(result)}, None, 200
+
+    def _execution_summaries_for_workouts(
+        self, workouts: list[Workout]
+    ) -> dict[int, dict]:
+        workout_ids = [w.id for w in workouts if w.activity_id]
+        if not workout_ids:
+            return {}
+
+        rows = self.db.execute(
+            select(
+                WorkoutExecution.workout_id,
+                WorkoutExecution.status,
+                WorkoutStepExecution.score,
+            )
+            .join(Workout, Workout.id == WorkoutExecution.workout_id)
+            .outerjoin(
+                WorkoutStepExecution,
+                WorkoutStepExecution.workout_execution_id == WorkoutExecution.id,
+            )
+            .where(
+                WorkoutExecution.workout_id.in_(workout_ids),
+                WorkoutExecution.activity_id == Workout.activity_id,
+                WorkoutExecution.algorithm_version == ALGORITHM_VERSION,
+            )
+        ).all()
+
+        scores_by_workout: dict[int, list[float | None]] = {}
+        status_by_workout: dict[int, str] = {}
+        for workout_id, status, score in rows:
+            status_by_workout[workout_id] = status
+            scores_by_workout.setdefault(workout_id, []).append(score)
+
+        return {
+            workout_id: {
+                "status": status_by_workout[workout_id],
+                "score": aggregate_execution_score(scores_by_workout[workout_id]),
+            }
+            for workout_id in status_by_workout
+        }
+
+    def _authorize_workout_operator(
+        self, user: User, workout: Workout
+    ) -> tuple[str | None, int]:
+        if workout.athlete_id == user.id:
+            return None, 200
+        relation_err = coach_athlete_relation_error(self.db, user.id, workout.athlete_id)
+        if relation_err:
+            return relation_err, COACH_ATHLETE_NOT_LINKED_STATUS
+        return None, 200
+
+    def link_activity(
+        self,
+        user: User,
+        workout_id: int,
+        activity_id: int,
+    ) -> tuple[dict | None, str | None, int]:
+        workout = self._load_workout(workout_id)
+        if not workout:
+            return None, "Workout not found", 404
+
+        auth_err, auth_status = self._authorize_workout_operator(user, workout)
+        if auth_err:
+            return None, auth_err, auth_status
+
+        if not workout.steps:
+            return None, "Workout has no structured steps to match", 400
+
+        activity = self.db.get(Activity, activity_id)
+        if activity is None or activity.user_id != workout.athlete_id:
+            return None, "Activity not found", 404
+
+        if workout.activity_id is not None and workout.activity_id != activity_id:
+            return None, "Workout is already linked to a different activity", 409
+
+        other = self.db.scalar(
+            select(Workout).where(
+                Workout.activity_id == activity_id,
+                Workout.id != workout.id,
+            )
+        )
+        if other is not None:
+            return None, "Activity is already linked to another workout", 409
+
+        already_linked = workout.activity_id == activity_id
+        if not already_linked:
+            workout.activity_id = activity_id
+            workout.status = WorkoutStatus.completed
+            workout.completed_at = datetime.utcnow()
+            self.db.flush()
+
+        from src.modules.execution.service import (
+            WorkoutExecutionService,
+            rematch_workout_activity,
+            serialize_workout_execution,
+        )
+
+        _execution, match_err, match_status = rematch_workout_activity(
+            self.db,
+            workout_id=workout.id,
+            activity_id=activity.id,
+            commit=False,
+        )
+        self.db.commit()
+        workout = self._load_workout(workout_id)
+        payload: dict = {"workout": self._workout_to_dict(workout)}
+        if match_err:
+            payload["matching_error"] = match_err
+            payload["workout_execution"] = None
+            logger.warning(
+                "Linked activity %s to workout %s but matching failed: %s",
+                activity_id,
+                workout_id,
+                match_err,
+            )
+        else:
+            loaded = WorkoutExecutionService(self.db)._load_current_execution(activity.id)
+            payload["workout_execution"] = (
+                serialize_workout_execution(loaded).model_dump(mode="json") if loaded else None
+            )
+        return payload, None, 200
+
+    def unlink_activity(
+        self,
+        user: User,
+        workout_id: int,
+    ) -> tuple[dict | None, str | None, int]:
+        workout = self._load_workout(workout_id)
+        if not workout:
+            return None, "Workout not found", 404
+
+        auth_err, auth_status = self._authorize_workout_operator(user, workout)
+        if auth_err:
+            return None, auth_err, auth_status
+
+        if workout.activity_id is None:
+            return None, "Workout is not linked to an activity", 400
+
+        workout.activity_id = None
+        workout.status = WorkoutStatus.scheduled
+        workout.completed_at = None
+        self.db.commit()
+        workout = self._load_workout(workout_id)
+        return {"workout": self._workout_to_dict(workout)}, None, 200
 
     def get_workout_for_user(
         self,

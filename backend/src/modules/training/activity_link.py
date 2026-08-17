@@ -22,8 +22,16 @@ RUN_WORKOUT_TYPES = {
 }
 
 
-def select_workout_for_activity(candidates: list[Workout], sport_code: str) -> Workout | None:
-    """Pick a single workout to link, or None if ambiguous."""
+def select_workout_for_activity(
+    candidates: list[Workout],
+    sport_code: str,
+    sport_id: int | None = None,
+) -> Workout | None:
+    """Pick a single workout to link, or None if ambiguous.
+
+    Never guesses when more than one eligible workout remains. Filtering by
+    sport_id (when both sides have one) is disambiguation, not ranking.
+    """
     if not candidates:
         return None
 
@@ -31,6 +39,13 @@ def select_workout_for_activity(candidates: list[Workout], sport_code: str) -> W
         eligible = [w for w in candidates if w.workout_type in RUN_WORKOUT_TYPES]
     else:
         eligible = [w for w in candidates if w.workout_type != WorkoutType.rest]
+
+    if sport_id is not None:
+        eligible = [
+            w
+            for w in eligible
+            if getattr(w, "sport_id", None) is None or w.sport_id == sport_id
+        ]
 
     if len(eligible) == 1:
         return eligible[0]
@@ -43,6 +58,7 @@ def try_link_activity_to_workout(
     activity_id: int,
     activity_date: date,
     sport_code: str,
+    sport_id: int | None = None,
 ) -> Workout | None:
     """
     Auto-complete a scheduled workout when a matching activity is imported.
@@ -56,13 +72,13 @@ def try_link_activity_to_workout(
             Workout.status == WorkoutStatus.scheduled,
             Workout.activity_id.is_(None),
         )
-        .order_by(Workout.id.asc())
+        .order_by(Workout.slot_ordinal.asc(), Workout.id.asc())
     ).all()
 
     if not candidates:
         return None
 
-    workout = select_workout_for_activity(list(candidates), sport_code)
+    workout = select_workout_for_activity(list(candidates), sport_code, sport_id=sport_id)
     if not workout:
         return None
 

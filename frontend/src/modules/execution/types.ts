@@ -80,6 +80,7 @@ export type WorkoutExecution = {
   status: WorkoutExecutionStatus;
   overall_confidence: number | null;
   algorithm_version: string;
+  execution_score: number | null;
   issue_count: number;
   responded_issue_count?: number;
   workout: WorkoutStub;

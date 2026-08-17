@@ -502,6 +502,7 @@ class ActivityIngestionService:
                 activity.id,
                 activity.date,
                 sport.code,
+                sport_id=activity.sport_id,
             )
             if linked is not None and linked.steps:
                 try:

@@ -467,7 +467,7 @@ class GearTrackService:
                     _recompute_gear_value_covered(self.db, default_gear.id)
 
         try_link_activity_to_workout(
-            self.db, user_id, activity.id, date, sport.code
+            self.db, user_id, activity.id, date, sport.code, sport_id=activity.sport_id
         )
 
         self.db.commit()

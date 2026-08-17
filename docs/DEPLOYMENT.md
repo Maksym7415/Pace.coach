@@ -25,6 +25,7 @@ flowchart LR
     end
     Client[Client / Frontend] --> CR
     CR -->|DATABASE_URL| PG
+    CR -->|FIT files| Storage[(Supabase Storage)]
     Strava[Strava Webhooks] --> CR
 ```
 
@@ -189,6 +190,9 @@ gcloud run deploy YOUR_SERVICE_NAME \
 | `ENCRYPTION_KEY`               | Fernet key for Strava token encryption — **Secret Manager** (see `.env.example`) | No (recommended)            |
 | `JWT_EXPIRY_HOURS`             | Token lifetime in hours (default 168)                                          | No                          |
 | `JWT_AUDIENCE`                 | JWT `aud` claim (default `shoe-tracker-api`)                                   | No                          |
+| `SUPABASE_URL`                 | Supabase project URL (e.g. `https://YOUR_PROJECT.supabase.co`)                 | Yes (FIT upload)            |
+| `SUPABASE_SERVICE_ROLE_KEY`    | Service role key — **Secret Manager**. Bypasses Storage RLS; never expose.     | Yes (FIT upload)            |
+| `ACTIVITY_STORAGE_BUCKET`      | Private Storage bucket name (default `activity-files`)                         | No                          |
 
 ---
 
@@ -213,7 +217,8 @@ gcloud run deploy YOUR_SERVICE_NAME \
 ## Security-related configuration
 
 - Always set `APP_ENV=production` on Cloud Run so missing secrets fail fast, CORS is limited to `FRONTEND_WEB_ORIGIN`, and the dev Uvicorn server is never used (production uses Gunicorn: `gunicorn src.api.app:app -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT`).
-- Manage sensitive values (`DATABASE_URL`, `JWT_SECRET`, `ENCRYPTION_KEY`) via **Secret Manager** when possible, not plain `--set-env-vars` or committed files.
+- Manage sensitive values (`DATABASE_URL`, `JWT_SECRET`, `ENCRYPTION_KEY`, `SUPABASE_SERVICE_ROLE_KEY`) via **Secret Manager** when possible, not plain `--set-env-vars` or committed files.
+- Create a **private** Storage bucket (default name `activity-files`) in the Supabase dashboard. The backend uploads FIT files with the service-role key and never serves objects publicly.
 - React Native Strava OAuth does not require `STRAVA_FRONTEND_REDIRECT_URL` unless you override the default deep link (`shoe-tracker://strava/callback`); the app can also pass `redirect_uri` to `GET /api/strava/connect`.
 - After enabling JWT `aud` verification, existing sessions may need to sign in again once.
 

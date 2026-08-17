@@ -22,6 +22,18 @@ def get_workout_execution(
     return success_json(result)
 
 
+@router.post("/api/activities/{activity_id}/workout-execution/rematch")
+def rematch_workout_execution(
+    activity_id: int,
+    user: CurrentUser,
+    service: WorkoutExecutionService = Depends(get_workout_execution_service),
+):
+    result, err, status = service.rematch_for_activity(user.id, activity_id)
+    if err:
+        raise error_json(status, err)
+    return success_json(result)
+
+
 @router.post("/api/activities/{activity_id}/workout-execution/athlete-responses")
 def save_athlete_responses(
     activity_id: int,

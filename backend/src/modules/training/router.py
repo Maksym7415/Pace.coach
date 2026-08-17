@@ -17,6 +17,7 @@ from src.modules.training.schemas import (
     WorkoutAssignRequest,
     WorkoutCompleteRequest,
     WorkoutCreateRequest,
+    WorkoutLinkActivityRequest,
     WorkoutTemplateWriteRequest,
     WorkoutUpdateRequest,
 )
@@ -194,6 +195,31 @@ def get_workout(
     result, err, status = service.get_workout_for_user(
         user, workout_id, is_coach=is_coach, is_athlete=is_athlete
     )
+    if err:
+        raise error_json(status, err)
+    return success_json(result)
+
+
+@router.post("/workouts/{workout_id}/link-activity")
+def link_activity(
+    workout_id: int,
+    body: WorkoutLinkActivityRequest,
+    user: Annotated[User, Depends(get_current_user)],
+    service: TrainingService = Depends(get_training_service),
+):
+    result, err, status = service.link_activity(user, workout_id, body.activity_id)
+    if err:
+        raise error_json(status, err)
+    return success_json(result)
+
+
+@router.delete("/workouts/{workout_id}/link-activity")
+def unlink_activity(
+    workout_id: int,
+    user: Annotated[User, Depends(get_current_user)],
+    service: TrainingService = Depends(get_training_service),
+):
+    result, err, status = service.unlink_activity(user, workout_id)
     if err:
         raise error_json(status, err)
     return success_json(result)

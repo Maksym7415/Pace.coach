@@ -6,7 +6,7 @@ import { useAuth } from "../../auth/AuthContext";
 import { getTodayEntry, type RecoveryEntry } from "../../recovery/api";
 import { Chip, MetricBar, PageFrame, SectionBox, SectionRow } from "../../shared/PageChrome";
 import { addDaysIso, todayIso, toDateKey, weekBounds } from "../../shared/dates";
-import { getCalendar, type Workout } from "../../training/api";
+import { getCalendar, completeWorkout, skipWorkout, type Workout } from "../../training/api";
 import { formatWorkoutPreview } from "../../workout/format";
 import { isRepeatBlock, type WorkoutStepItem } from "../../workout/types";
 import { WorkoutDetailModal } from "../../workout/WorkoutDetailModal";
@@ -43,6 +43,7 @@ export function AthleteTodayPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedWorkout, setSelectedWorkout] = useState<Workout | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
@@ -80,6 +81,15 @@ export function AthleteTodayPage() {
       cancelled = true;
     };
   }, [today, week.start, week.end]);
+
+  async function refreshWorkouts() {
+    const [todayResult, weekResult] = await Promise.all([
+      getCalendar(today, today),
+      getCalendar(week.start, week.end),
+    ]);
+    if (todayResult.success) setTodayWorkouts(todayResult.workouts);
+    if (weekResult.success) setWeekWorkouts(weekResult.workouts);
+  }
 
   const primaryWorkout = todayWorkouts[0] ?? null;
   const workoutsByDay = useMemo(() => {
@@ -378,7 +388,36 @@ export function AthleteTodayPage() {
       </PageFrame>
 
       {selectedWorkout && (
-        <WorkoutDetailModal workout={selectedWorkout} onClose={() => setSelectedWorkout(null)} />
+        <WorkoutDetailModal
+          workout={selectedWorkout}
+          onClose={() => {
+            setSelectedWorkout(null);
+            setActionError(null);
+          }}
+          athleteActions={{
+            onComplete: async () => {
+              setActionError(null);
+              const result = await completeWorkout(selectedWorkout.id);
+              if (!result.success) {
+                setActionError(result.error ?? "Failed to mark workout complete");
+                return;
+              }
+              setSelectedWorkout(null);
+              await refreshWorkouts();
+            },
+            onSkip: async () => {
+              setActionError(null);
+              const result = await skipWorkout(selectedWorkout.id);
+              if (!result.success) {
+                setActionError(result.error ?? "Failed to skip workout");
+                return;
+              }
+              setSelectedWorkout(null);
+              await refreshWorkouts();
+            },
+          }}
+          actionError={actionError}
+        />
       )}
     </div>
   );
