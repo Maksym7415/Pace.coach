@@ -12,6 +12,11 @@ import {
   type WorkoutTemplate as SavedTemplate,
   type WorkoutType,
 } from "../../training/api";
+import {
+  createWorkoutForItem,
+  getBuilderContext,
+  type BuilderContext,
+} from "../../planning/api";
 import { todayIso } from "../../shared/dates";
 import { normalizeWorkoutSteps, validateWorkoutStepDuration } from "../normalize";
 import { computeRollups } from "../rollup";
@@ -36,6 +41,22 @@ type CoachWorkoutBuilderPageProps = {
   mode: BuilderMode;
 };
 
+function microLabel(ctx: BuilderContext): string {
+  if (ctx.microcycle.name) return ctx.microcycle.name;
+  return `Week ${ctx.microcycle.ordinal + 1}`;
+}
+
+function formatMaybeRange(start: string | null, end: string | null): string | null {
+  if (!start || !end) return null;
+  const s = new Date(`${start}T00:00:00Z`);
+  const e = new Date(`${end}T00:00:00Z`);
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  if (s.getUTCMonth() === e.getUTCMonth()) {
+    return `${months[s.getUTCMonth()]} ${s.getUTCDate()}–${e.getUTCDate()}`;
+  }
+  return `${months[s.getUTCMonth()]} ${s.getUTCDate()} – ${months[e.getUTCMonth()]} ${e.getUTCDate()}`;
+}
+
 export function CoachWorkoutBuilderPage({ mode }: CoachWorkoutBuilderPageProps) {
   const navigate = useNavigate();
   const params = useParams<{ workoutId?: string; templateId?: string }>();
@@ -53,6 +74,10 @@ export function CoachWorkoutBuilderPage({ mode }: CoachWorkoutBuilderPageProps) 
   const prefAthleteId = Number(searchParams.get("athleteId")) || null;
   const prefDate = searchParams.get("date");
   const prefTemplateId = Number(searchParams.get("templateId")) || null;
+  const planItemId = Number(searchParams.get("planItemId")) || null;
+  const cyclePlanId = Number(searchParams.get("planId")) || null;
+  const cycleMesoId = Number(searchParams.get("mesoId")) || null;
+  const cycleMicroId = Number(searchParams.get("microId")) || null;
 
   const [loading, setLoading] = useState(true);
   const [sports, setSports] = useState<Sport[]>([]);
@@ -70,6 +95,7 @@ export function CoachWorkoutBuilderPage({ mode }: CoachWorkoutBuilderPageProps) 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [cycleContext, setCycleContext] = useState<BuilderContext | null>(null);
 
   const primaryAthleteId = lockedAthleteId ?? athleteIds[0] ?? prefAthleteId ?? 0;
   const selectedSport = sports.find((s) => s.id === sportId) ?? null;
@@ -175,6 +201,35 @@ export function CoachWorkoutBuilderPage({ mode }: CoachWorkoutBuilderPageProps) 
         }
       }
 
+      if (planItemId) {
+        const ctx = await getBuilderContext(planItemId);
+        if (!cancelled && ctx.success && ctx.plan_item_id) {
+          setCycleContext({
+            plan_item_id: ctx.plan_item_id,
+            athlete_id: ctx.athlete_id,
+            title: ctx.title,
+            intent: ctx.intent,
+            training_plan: ctx.training_plan,
+            mesocycle: ctx.mesocycle,
+            microcycle: ctx.microcycle,
+            suggested: ctx.suggested,
+          });
+          setTitle(ctx.title || "");
+          if (ctx.intent) setPurpose(ctx.intent);
+          if (ctx.athlete_id) {
+            setAthleteIds([ctx.athlete_id]);
+            setLockedAthleteId(ctx.athlete_id);
+          }
+          if (ctx.suggested?.scheduled_date) {
+            setDates([ctx.suggested.scheduled_date]);
+          }
+          if (ctx.suggested?.sport_id) setSportId(ctx.suggested.sport_id);
+          if (ctx.suggested?.workout_type) {
+            setWorkoutType(ctx.suggested.workout_type as WorkoutType);
+          }
+        }
+      }
+
       setLoading(false);
     }
 
@@ -182,7 +237,7 @@ export function CoachWorkoutBuilderPage({ mode }: CoachWorkoutBuilderPageProps) 
     return () => {
       cancelled = true;
     };
-  }, [mode, workoutId, templateId, prefAthleteId, prefTemplateId]);
+  }, [mode, workoutId, templateId, prefAthleteId, prefTemplateId, planItemId]);
 
   function applyWorkout(workout: Workout) {
     setLockedAthleteId(workout.athlete_id);
@@ -260,8 +315,13 @@ export function CoachWorkoutBuilderPage({ mode }: CoachWorkoutBuilderPageProps) 
       }
     }
     if (mode === "create") {
-      if (athleteIds.length === 0) return "Select at least one athlete";
-      if (dates.length === 0) return "Select at least one date";
+      if (planItemId) {
+        if (!athleteIds.length && !prefAthleteId) return "Missing athlete for planned workout";
+        if (dates.length === 0) return "Select a scheduled date";
+      } else {
+        if (athleteIds.length === 0) return "Select at least one athlete";
+        if (dates.length === 0) return "Select at least one date";
+      }
     }
     return null;
   }
@@ -318,7 +378,47 @@ export function CoachWorkoutBuilderPage({ mode }: CoachWorkoutBuilderPageProps) 
         return;
       }
       setSuccess("Workout updated");
+      if (planItemId && (cyclePlanId || cycleContext?.training_plan.id)) {
+        const athlete = lockedAthleteId ?? athleteIds[0];
+        const meso = cycleMesoId ?? cycleContext?.mesocycle.id;
+        const micro = cycleMicroId ?? cycleContext?.microcycle.id;
+        navigate(
+          `/coach/athletes/${athlete}/plan?meso=${meso ?? ""}&micro=${micro ?? ""}&item=${planItemId}`,
+        );
+        return;
+      }
       navigate(`/coach/athletes/${lockedAthleteId ?? athleteIds[0]}`);
+      return;
+    }
+
+    if (planItemId) {
+      const athleteId = lockedAthleteId ?? athleteIds[0] ?? prefAthleteId;
+      if (!athleteId || !dates[0]) {
+        setSaving(false);
+        setError("Missing athlete or date for planned workout");
+        return;
+      }
+      const result = await createWorkoutForItem(planItemId, {
+        athlete_id: athleteId,
+        scheduled_date: dates[0],
+        sport_id: sportId,
+        workout_type: workoutType,
+        title: title.trim(),
+        purpose: purpose.trim() || null,
+        target_rpe: targetRpe,
+        description: description.trim() || null,
+        steps,
+      });
+      setSaving(false);
+      if (!result.success) {
+        setError(result.error ?? "Failed to create workout for plan item");
+        return;
+      }
+      const meso = cycleMesoId ?? cycleContext?.mesocycle.id;
+      const micro = cycleMicroId ?? cycleContext?.microcycle.id;
+      navigate(
+        `/coach/athletes/${athleteId}/plan?meso=${meso ?? ""}&micro=${micro ?? ""}&item=${planItemId}`,
+      );
       return;
     }
 
@@ -408,12 +508,65 @@ export function CoachWorkoutBuilderPage({ mode }: CoachWorkoutBuilderPageProps) 
   }
 
   const selectedItem = selectedIndex != null ? steps[selectedIndex] ?? null : null;
+  const cycleBackHref =
+    cycleContext || planItemId
+      ? `/coach/athletes/${lockedAthleteId ?? athleteIds[0] ?? prefAthleteId}/plan?meso=${cycleMesoId ?? cycleContext?.mesocycle.id ?? ""}&micro=${cycleMicroId ?? cycleContext?.microcycle.id ?? ""}&item=${planItemId ?? ""}`
+      : null;
+  const periodRange = cycleContext
+    ? formatMaybeRange(cycleContext.microcycle.start_date, cycleContext.microcycle.end_date)
+    : null;
 
   return (
     <div className="stack builder-page">
       <p>
-        <Link to={mode === "template" ? "/templates" : "/planning"}>← Back</Link>
+        <Link to={cycleBackHref ?? (mode === "template" ? "/templates" : "/planning")}>
+          {cycleBackHref ? "← Back to Cycle Designer" : "← Back"}
+        </Link>
       </p>
+
+      {cycleContext ? (
+        <section className="rounded-md border border-slate-200 bg-white p-3">
+          <div className="mb-2 font-mono text-[10px] uppercase tracking-[0.14em] text-slate-500">
+            Create workout
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-slate-400">Training Plan</div>
+              <div className="text-[13px] font-medium text-slate-900">
+                {cycleContext.training_plan.name}
+              </div>
+            </div>
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-slate-400">Block</div>
+              <div className="text-[13px] font-medium text-slate-900">
+                {cycleContext.mesocycle.name}
+              </div>
+            </div>
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-slate-400">Period</div>
+              <div className="text-[13px] font-medium text-slate-900">
+                {microLabel(cycleContext)}
+                {periodRange ? ` · ${periodRange}` : ""}
+              </div>
+            </div>
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-slate-400">Focus</div>
+              <div className="text-[13px] font-medium text-slate-900">
+                {cycleContext.microcycle.intent ||
+                  cycleContext.intent ||
+                  cycleContext.mesocycle.intent ||
+                  "—"}
+              </div>
+            </div>
+          </div>
+          {cycleContext.title ? (
+            <p className="mt-2 text-[12px] text-slate-500">
+              Converting placeholder: &ldquo;{cycleContext.title}&rdquo;
+            </p>
+          ) : null}
+          <p className="mt-1 text-[11px] text-slate-400">Planning position · read-only</p>
+        </section>
+      ) : null}
 
       <IntentBar
         purpose={purpose}

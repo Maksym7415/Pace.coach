@@ -22,6 +22,7 @@ from src.modules.gear_track.router import router as gear_track_router
 from src.modules.identity.router import router as identity_router
 from src.modules.recovery.router import router as recovery_router
 from src.modules.training.router import router as training_router
+from src.modules.planning.router import router as planning_router
 from src.modules.third_party.strava.router import router as strava_router
 
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
@@ -98,6 +99,7 @@ def create_app() -> FastAPI:
     app.include_router(coaching_router)
     app.include_router(recovery_router)
     app.include_router(training_router)
+    app.include_router(planning_router)
     app.include_router(execution_router)
 
     @app.exception_handler(HTTPException)

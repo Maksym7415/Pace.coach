@@ -248,6 +248,15 @@ export function CalendarEventPopup({
         )}
 
         <div className="calendar-event-popup-cta">
+          {view.workout?.cycle_context ? (
+            <Link
+              to={`/coach/athletes/${athleteId}/plan?meso=${view.workout.cycle_context.mesocycle_id}&micro=${view.workout.cycle_context.microcycle_id}&item=${view.workout.cycle_context.plan_item_id}`}
+              className="button-link"
+              onClick={onClose}
+            >
+              View in Cycle →
+            </Link>
+          ) : null}
           {primaryIsLink && view.activityId != null ? (
             <Link
               to={`/activity/${view.activityId}`}

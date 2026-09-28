@@ -91,6 +91,20 @@ export type Workout = {
   execution_status: string | null;
   created_at: string | null;
   updated_at: string | null;
+  cycle_context?: {
+    training_plan_id: number;
+    training_plan_name: string;
+    mesocycle_id: number;
+    mesocycle_name: string;
+    mesocycle_intent: string | null;
+    microcycle_id: number;
+    microcycle_name: string | null;
+    microcycle_ordinal: number;
+    microcycle_start_date: string | null;
+    microcycle_end_date: string | null;
+    plan_item_id: number;
+    plan_item_title: string;
+  } | null;
 };
 
 export type WorkoutTemplate = {

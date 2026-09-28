@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from collections.abc import Generator
 from datetime import date, datetime, timedelta
+from uuid import uuid4
 
 import pytest
 from sqlalchemy import create_engine, event, select
@@ -11,7 +12,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from src.core.database import Base
 import src.models  # noqa: F401 — register all tables on Base.metadata
 from src.modules.activity_import.models import ActivityLap, ActivityTrackPoint
-from src.modules.athlete_profile.models import Sport
+from src.modules.athlete_profile.models import AthleteSport, Sport
 from src.modules.coaching.models import CoachAthleteRelation, RelationStatus
 from src.modules.gear_track.models import Activity
 from src.modules.identity.models import User, UserRole, UserRoleEnum
@@ -47,7 +48,7 @@ def make_user(
     role: UserRoleEnum,
     username: str | None = None,
 ) -> User:
-    suffix = f"{role.value}-{id(object()) % 10_000_000}"
+    suffix = f"{role.value}-{uuid4().hex[:12]}"
     user = User(
         username=username or suffix[:30],
         email=f"{suffix}@example.test",
@@ -157,3 +158,34 @@ def make_relation(db: Session, coach: User, athlete: User) -> CoachAthleteRelati
     db.add(relation)
     db.flush()
     return relation
+
+
+def enroll_sport(db: Session, athlete: User, sport: Sport, *, primary: bool = True) -> AthleteSport:
+    row = AthleteSport(
+        athlete_id=athlete.id,
+        sport_id=sport.id,
+        is_primary=primary,
+    )
+    db.add(row)
+    db.flush()
+    return row
+
+
+def linked_coach_athlete(db: Session) -> tuple[User, User]:
+    coach = make_user(db, role=UserRoleEnum.coach)
+    athlete = make_user(db, role=UserRoleEnum.athlete)
+    make_relation(db, coach, athlete)
+    return coach, athlete
+
+
+@pytest.fixture(autouse=True)
+def _default_planning_today(request, monkeypatch):
+    """Keep planning periods future unless a test freezes a specific day."""
+    nodeid = request.node.nodeid
+    if not any(key in nodeid for key in ("planning", "cycle_review")):
+        return
+    if request.node.name.startswith("test_planning_today"):
+        return
+    from tests.planning_helpers import freeze_today
+
+    freeze_today(monkeypatch, date(2026, 8, 15))

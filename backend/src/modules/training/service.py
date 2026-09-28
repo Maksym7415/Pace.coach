@@ -51,6 +51,7 @@ class TrainingService:
         self,
         workout: Workout,
         execution_summary: dict | None = None,
+        cycle_context: dict | None = None,
     ) -> dict:
         linked_activity = None
         if workout.activity_id:
@@ -84,6 +85,7 @@ class TrainingService:
             "completed_at": workout.completed_at.isoformat() if workout.completed_at else None,
             "notes": workout.notes,
             "activity_id": workout.activity_id,
+            "cycle_context": cycle_context,
             "linked_activity": linked_activity,
             "execution_score": execution_summary["score"] if execution_summary else None,
             "execution_status": execution_summary["status"] if execution_summary else None,
@@ -211,6 +213,7 @@ class TrainingService:
         self,
         coach: User,
         data: WorkoutCreateRequest,
+        commit: bool = True,
     ) -> tuple[dict | None, str | None, int]:
         athlete_err = self._assert_athlete_user(data.athlete_id)
         if athlete_err:
@@ -243,7 +246,10 @@ class TrainingService:
             status=WorkoutStatus.scheduled,
         )
         self.db.add(workout)
-        self.db.commit()
+        if commit:
+            self.db.commit()
+        else:
+            self.db.flush()
         workout = self._load_workout(workout.id)
         logger.info(
             "Coach %s created workout %s for athlete %s",
@@ -335,6 +341,19 @@ class TrainingService:
 
         if workout.status != WorkoutStatus.scheduled:
             return None, "Only scheduled workouts can be edited", 400
+
+        if data.scheduled_date != workout.scheduled_date:
+            from src.modules.planning.context import microcycle_range_for_workout
+
+            rng = microcycle_range_for_workout(self.db, workout.id)
+            if rng is not None:
+                _micro_id, start, end = rng
+                if not (start <= data.scheduled_date <= end):
+                    return (
+                        None,
+                        "This workout is planned inside a training cycle; move it via the planning API",
+                        409,
+                    )
 
         fields, err, status = self._prepare_workout_fields(
             workout.athlete_id, data.sport_id, data.steps
@@ -500,8 +519,15 @@ class TrainingService:
             .order_by(Workout.scheduled_date.asc(), Workout.slot_ordinal.asc(), Workout.id.asc())
         ).all()
         summaries = self._execution_summaries_for_workouts(workouts)
+        from src.modules.planning.context import cycle_context_for_workouts
+
+        contexts = cycle_context_for_workouts(self.db, [w.id for w in workouts])
         result = [
-            self._workout_to_dict(w, execution_summary=summaries.get(w.id))
+            self._workout_to_dict(
+                w,
+                execution_summary=summaries.get(w.id),
+                cycle_context=contexts.get(w.id),
+            )
             for w in workouts
         ]
         return {"workouts": result, "count": len(result)}, None, 200

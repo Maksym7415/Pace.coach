@@ -3,8 +3,9 @@
 > **Canonical source of truth** for product direction, current state, and implementation
 > sequencing. Living document — update it in the same PR that changes the reality it describes.
 >
-> Last verified against code: **2026-08-17** (M0 landed).
+> Last verified against code: **2026-09-28** (M2 domain/API landed; small UI follow-ups remain).
 > Companion document: [`execution-architecture.md`](./execution-architecture.md).
+> M2 detail: [`m2-cycle-designer-plan.md`](./m2-cycle-designer-plan.md).
 
 ## Status legend
 
@@ -87,7 +88,7 @@ today cannot be recovered later.
 | Area | Status | Reality |
 |---|---|---|
 | Today | `PARTIAL` | Real recovery check-in, today's workout, 7-day strip, recent activities, FIT upload. Scheduled workouts can be marked complete or skipped from the workout detail modal. The "AI insight" block is static text. |
-| Calendar | `PARTIAL` | Month calendar on `/activities` backed by `/api/training/calendar` is real. No dedicated weekly view. Event popup shows the backend-derived `execution_score` when one exists. |
+| Calendar | `PARTIAL` | Month calendar on `/activities` backed by `/api/training/calendar` is real. Shows executable workouts (with optional `cycle_context`). **Does not yet render unconverted PlanItem placeholders** on their resolved planned date. No dedicated weekly view. Event popup shows the backend-derived `execution_score` when one exists. |
 | Planned workouts | `DONE` | Read path fully wired. Athlete can mark complete or skip from Today (`PUT /workouts/{id}/complete` and `/skip`), only while status is `scheduled`. |
 | Activities | `DONE` | List + calendar, date-ranged, real API, links to detail. |
 | Activity detail | `PARTIAL` | Summary and execution sections real. Charts, zone distribution, insights and coach notes are placeholders. |
@@ -101,9 +102,10 @@ today cannot be recovered later.
 
 | Area | Status | Reality |
 |---|---|---|
-| Athlete management | `PARTIAL` | Invite, user search, accept/reject, active roster all real. Roster rows display mock mesocycle labels. |
-| Individual Workout Builder | `DONE` | Three-pane builder (Library / Canvas / Inspector) with intent bar. Step types gated by sport, time/distance/lap-button durations, pace/HR/power/cadence targets, real zone integration, single-level repeats, templates, client validation. |
-| Workout assignment | `DONE` | `POST /api/training/workouts/assign`, athletes × dates, capped at 50 server-side. |
+| Athlete management | `PARTIAL` | Invite, user search, accept/reject, active roster all real. Roster rows still display mock mesocycle labels (not yet wired to live plans). |
+| Cycle Designer / Training Plan | `PARTIAL` | Domain + API + coach/athlete Cycle Designer UI are live (`/api/planning/...`). Coach can design mesocycles, microcycles, and PlanItems; convert placeholders to workouts; run cycle review. **Follow-ups:** Placement UI in Designer (unplaced / Day N / specific date) and Calendar presentation of placeholders — see M2. |
+| Individual Workout Builder | `DONE` | Three-pane builder (Library / Canvas / Inspector) with intent bar. Step types gated by sport, time/distance/lap-button durations, pace/HR/power/cadence targets, real zone integration, single-level repeats, templates, client validation. Builder can open from a PlanItem via builder-context. |
+| Workout assignment | `DONE` | `POST /api/training/workouts/assign`, athletes × dates, capped at 50 server-side. Ad-hoc assignment remains; plan-attached workouts also flow through planning attach/create. |
 | Activity review | `PARTIAL` | Coach opens the **same** `/activity/:id` page as the athlete and can read saved athlete responses. No coach-specific review UI, no reply, no "mark reviewed" (button is disabled). |
 | Coach ↔ athlete communication | `MISSING` | No table, no API, no UI. Every entry point is a disabled button or "coming soon". |
 
@@ -133,7 +135,7 @@ pace.coach/
 │   ├── src/core/             auth (JWT), config, database, responses, rate_limit
 │   ├── src/models.py         imports every ORM model for Alembic metadata
 │   ├── src/modules/          feature modules (see below)
-│   ├── migrations/versions/  Alembic chain, head = y2b3c4d5e6f7
+│   ├── migrations/versions/  Alembic chain, head = z3c4d5e6f7a8
 │   └── tests/
 ├── frontend/         React 19 + Vite 6 + TypeScript, React Router v7, Tailwind 4
 └── docs/
@@ -150,6 +152,7 @@ It is not the production frontend and must not be wired to the API.
 | `identity` | `User`, `UserRole`, auth endpoints | implemented |
 | `coaching` | `CoachAthleteRelation`, invitation lifecycle, access helper | implemented |
 | `training` | `Workout`, `WorkoutTemplate`, calendar, assignment, step schema, activity linking | implemented |
+| `planning` | `TrainingPlan`, `Mesocycle`, `Microcycle`, `PlanItem` (+ placement), cycle review, change log | implemented (M2) |
 | `execution` | plan resolution, segmentation, metrics, scoring, issues, execution read API | implemented |
 | `activity_import` | FIT upload, `StoredFile`, `ActivityImport`, laps, track points, sources | implemented |
 | `fit_parser` | pure FIT parsing → Pydantic DTOs (no DB) | implemented |
@@ -170,13 +173,13 @@ It is not the production frontend and must not be wired to the API.
 - **Data layer** — native `fetch` through `modules/shared/api.ts`. No React Query, no global
   store; each screen fetches in an effect.
 - **Builder drag-and-drop** — `@dnd-kit` (canvas step reordering).
-- **Modules** — mirror backend domains (`athlete/`, `coach/`, `execution/`, `workout/builder/`,
-  `activities/`, `calendar/`, `recovery/`, `athlete-profile/`).
+- **Modules** — mirror backend domains (`athlete/`, `coach/`, `planning/`, `execution/`,
+  `workout/builder/`, `activities/`, `calendar/`, `recovery/`, `athlete-profile/`).
 
 ### Database
 
 PostgreSQL via SQLAlchemy 2. Supabase in production, `docker compose up db` locally.
-29 active tables. Alembic head `x1a2b3c4d5e6`.
+Alembic head `z3c4d5e6f7a8` (adds the M2 planning tables).
 
 Two project conventions apply to schema work:
 
@@ -200,10 +203,20 @@ Two project conventions apply to schema work:
 
 ### Training domain
 
-`Workout` is the single scheduled, executable unit: `athlete_id`, `scheduled_date`,
+`Workout` remains the single scheduled, executable unit: `athlete_id`, `scheduled_date`,
 `workout_type`, `sport_id`, intent fields (`purpose`, `target_rpe`, `description`), and a
 `steps` JSON array. `WorkoutTemplate` is a coach-owned reusable structure with the same step
-shape and no scheduling. There is no plan hierarchy above `Workout`.
+shape and no scheduling.
+
+Above it, M2 adds a planning hierarchy owned by `modules/planning/`:
+
+```
+TrainingPlan → Mesocycle → Microcycle → PlanItem ──(optional)──> Workout
+```
+
+A `PlanItem` is planning intent (placeholder or converted). Placement
+(`null` | `relative_day` | `specific_date`) is the source of truth for calendar position;
+`resolved_date` is derived and never persisted. Ad-hoc workouts (no PlanItem) still work.
 
 Steps are JSON but carry **stable UUID identity** minted by `ensure_step_ids()` and preserved
 across coach edits. This is the invariant everything downstream depends on.
@@ -277,6 +290,12 @@ User ──< UserRole (athlete | coach)
   │
   ├──< CoachAthleteRelation (pending | active | revoked | rejected; permissions JSON [unused])
   │
+  ├──< TrainingPlan (athlete, coach?, dates, status, planning_timezone)
+  │       └──< Mesocycle ──< Microcycle ──< PlanItem ──(workout_id?)──> Workout
+  │              ├── CycleSystemAnalysis (immutable)
+  │              └── CycleCoachReview (versioned draft/approved)
+  │       └──< PlanChangeLog (append-only; entity_id is not an FK)
+  │
   ├──< Workout (athlete_id, scheduled_date, slot_ordinal, workout_type, steps JSON, status, activity_id?)
   │       ├──< WorkoutPlanSnapshot (resolved_plan JSON)
   │       └──< WorkoutExecution ──< WorkoutStepExecution
@@ -299,7 +318,14 @@ User (coach) ──< WorkoutTemplate (steps JSON — no FK from Workout back to 
 |---|---|
 | `User` | `users`. Roles in a separate table; a user may be both athlete and coach. |
 | `CoachAthleteRelation` | Unique `(coach_id, athlete_id)`. Only `status = 'active'` grants access. |
-| `Workout` | The single scheduled, executable unit. Editable only while `scheduled`. `slot_ordinal` orders multiple sessions on the same date; it does not make auto-link pick a winner. |
+| `TrainingPlan` | Macrocycle container. Status `draft` / `active` / `completed` / `archived`. Only one active plan may overlap dates per athlete. |
+| `Mesocycle` | Training block with focus, optional `anchor_date`, ordinal within the plan. |
+| `Microcycle` | Coach-defined period (`duration_days` 1–28). Dates derived when the plan has a start date; duration mode when undated. |
+| `PlanItem` | Planning intent inside a microcycle. Optional `workout_id` (placeholder vs converted). Placement: `placement_type` null \| `relative_day` \| `specific_date`, with `placement_day` / `placement_date`. Resolved calendar date is derived, never stored. |
+| `CycleSystemAnalysis` | Immutable deterministic analysis snapshot per mesocycle. |
+| `CycleCoachReview` | Versioned coach review (`draft` / `approved`); absence of a row = not reviewed. |
+| `PlanChangeLog` | Append-only audit of plan mutations; `entity_id` is not an FK so rows survive deletes. |
+| `Workout` | The single scheduled, executable unit. Editable only while `scheduled`. `slot_ordinal` orders multiple sessions on the same date; it does not make auto-link pick a winner. May exist without a PlanItem (ad-hoc). |
 | `WorkoutTemplate` | Coach-owned reusable structure. **No lineage** — `templateStepId` exists in the schema and nothing populates it. |
 | `WorkoutPlanSnapshot` | `resolved_plan` JSON = `ResolvedPlan` (tree + flat occurrences). Written at match time. |
 | `Activity` | Defined in the `gear_track` module. Unique per import; partial unique on `(user_id, strava_activity_id)`. |
@@ -321,12 +347,9 @@ These are **`MISSING`**, not partial. Nothing in the schema represents them:
 
 | Concept | Consequence |
 |---|---|
-| `TrainingPlan` | No container above the individual workout. |
-| `Mesocycle` / `PlanBlock` | No training block, phase, or focus period. |
-| `Microcycle` / `PlanWeek` | No week entity; weeks are only a calendar date range. |
-| Race / Goal Event | `race_pace` is a `WorkoutType` enum value, nothing more. No goal date to periodize toward. |
+| Race / Goal Event entity | `goal_event_date` on `TrainingPlan` is a date field only. `race_pace` remains a `WorkoutType` enum value, not a goal object. |
 | Coach ↔ athlete conversation | No comment, message, or thread table anywhere. |
-| Coach decision history | `Workout.steps` is destructively overwritten on edit. No record of what a coach changed or why. |
+| Coach decision history (workout edits) | `Workout.steps` is still destructively overwritten on edit. Plan-structure changes are logged in `plan_change_log`; workout-step edits are not. |
 | Activity-level performance metrics | No per-activity rollup table. HR drift and pace variability are computed **only inside matched workout step windows**; unmatched and unstructured activities produce nothing analyzable. |
 | Performance trends | No trend, baseline sample, or performance event storage. |
 
@@ -410,45 +433,47 @@ athlete response — there is no coach side and no outcome.
 
 ---
 
-### M2 — Training Plan / Cycle Builder · `NEXT MAJOR FEATURE`
+### M2 — Training Plan / Cycle Builder · `DONE` (UI follow-ups remaining)
 
-The main product feature after M0.
+The main product feature after M0. Domain, API, and Cycle Designer UI are shipped.
+Two small UI slices remain and will be followed up later (they do not block M1/M3).
 
-**Intended hierarchy**
+**Hierarchy (as shipped)**
 
 ```
 TrainingPlan
-  → PlanBlock  (Mesocycle)
-      → PlanWeek  (Microcycle)
-          → Workout
-              → WorkoutExecution
-                  → WorkoutStepExecution
+  → Mesocycle
+      → Microcycle
+          → PlanItem  (placeholder or converted; placement optional)
+              → Workout            [existing, unchanged schema]
+                  → WorkoutExecution
+                      → WorkoutStepExecution
 ```
 
-**The goal is not only to schedule workouts.** The cycle must visually communicate:
+**Shipped**
 
-- training **intent** — why this block exists
-- **progression** — how load and demand develop across weeks
-- **planned load** — what the athlete is being asked to absorb
-- **completed work** — what actually happened, from real execution data
-- **athlete progress through the cycle** — position and trajectory, not just a checklist
-
-**Minimal architectural changes identified in the audit**
-
-| Change | Note |
+| Item | Note |
 |---|---|
-| `TrainingPlan` | athlete, coach, name, date range, optional goal event date, status |
-| `PlanBlock` | mesocycle: plan, ordinal, name, focus, week count |
-| `PlanWeek` | microcycle: block, ordinal, start date, intent |
-| `Workout.plan_week_id` | **nullable** FK — ad-hoc workouts keep working unchanged |
-| `Workout.slot_ordinal` | session within a day (delivered in M0) |
-| Idempotent plan application | applying or re-applying a plan must upsert, not blindly create; `assign_workouts` is currently fire-and-forget |
-| Template lineage | populate `templateStepId` and add a `template_id` FK so plan-level edits can propagate |
+| Planning module | `backend/src/modules/planning/` — models, enums, date reflow, lock/immutability, change log, cycle analysis/review, calendar bands / `cycle_context`. |
+| Schema | Tables: `training_plans`, `mesocycles`, `microcycles`, `plan_items`, `cycle_system_analyses`, `cycle_coach_reviews`, `plan_change_log`. Migration `z3c4d5e6f7a8`. Purely additive — no columns added to `workouts` / execution. |
+| PlanItem placement (domain/API) | Canonical: `placement_type` null \| `relative_day` \| `specific_date`, plus `placement_day` / `placement_date`. `resolved_date` derived at read time; never persisted. Relative days move with the microcycle; specific dates pin and surface `placement_conflict` when out of range. |
+| Progressive refinement | Undated (duration-mode) plans, mesocycles without items, and unplaced PlanItems are valid. |
+| Historical immutability | Lock states `locked` / `current` / `future` enforced on plan mutations; `plan_change_log` records every write. |
+| Cycle Designer UI | Coach Cycle Designer + athlete cycle view, review panel, attach/convert PlanItem → Workout, builder-context integration. |
+| Calendar cycle context | Executable workouts linked to a PlanItem expose `cycle_context` on the training calendar. |
 
-The deliberate constraint: `Workout` remains the single executable entity and gains only a
-nullable parent plus a slot. **No execution-layer change is required.**
+**UI follow-ups (deferred — not blocking other milestones)**
 
-*Do not implement now.*
+| # | Item | Note |
+|---|---|---|
+| 1 | Placement UI in Designer | Coach must be able to set PlanItem placement as: **Not scheduled** (unplaced) · **Day N** (`relative_day`) · **Specific date** (`specific_date`). Domain/API already support this; Designer UI does not yet expose it. |
+| 2 | Calendar presentation of placeholders | Show a placed PlanItem placeholder on its resolved planned date, clearly distinct from an executable/completed Workout. Placeholder is not executable until converted. Do not invent a separate CalendarEvent entity for placeholders. |
+
+**Deliberate constraints that remain true**
+
+- `Workout` stays the single executable entity; planning attaches via `plan_items.workout_id`.
+- No execution-layer change was required for M2.
+- Template lineage (`template_id` / `templateStepId`) was deferred.
 
 ---
 
@@ -537,8 +562,9 @@ name the activities and baseline samples that produced it.
 human produced, and presented as evidence for a coach's decision rather than a decision.
 
 Two foundations are **write-time** and cannot be backfilled: the coach decision log and coach
-responses/outcomes. If they are not captured as M1 and M2 are built, that history will not
-exist when M5 arrives.
+responses/outcomes. M2 now captures plan-structure changes in `plan_change_log`. Workout-step
+edits and coach review replies (M1) are still not logged — if those are not captured as M1 lands,
+that history will not exist when M5 arrives.
 
 *Do not implement now.*
 
@@ -552,7 +578,7 @@ exist when M5 arrives.
               ┌─────────────────────┼─────────────────────┐
               │                     │                     │
    M1 — Coach ↔ Athlete    M2 — Training Plans /    M3 — Activity Metrics
-        Feedback                Cycles  [NEXT MAJOR]      & Baselines
+        Feedback                Cycles  [DONE]*           & Baselines
       (parallel foundation)         │                     │
               │                     └──────────┬──────────┘
               │                                │
@@ -563,13 +589,16 @@ exist when M5 arrives.
                         M5 — AI Coach
 ```
 
+\* M2 domain/API/Designer are done. Remaining UI follow-ups: Placement UI in Designer;
+Calendar placeholder presentation. These do not block M1/M3/M4.
+
 Notes:
 
-- **M0 is done.** M1, M2, and M3 are mutually independent and may be reordered or parallelized.
-- **M1 is a parallel foundation, not a blocker for M2/M3.** It feeds M5 directly: without
+- **M0 and M2 (core) are done.** M1 and M3 are mutually independent and may be reordered or parallelized.
+- **M1 is a parallel foundation, not a blocker for M3.** It feeds M5 directly: without
   coach responses and outcomes, the AI has no coaching history to retrieve.
 - **M4 requires both M2 and M3** — trends need metrics, and interpreting them needs plan
-  context.
+  context. M2's remaining UI follow-ups are not a prerequisite for starting M3 or M4 design.
 - **M3 requires a scalable background job mechanism.** The current approach (FastAPI
   `BackgroundTasks` plus raw threads for stale-import recovery) cannot survive recomputing or
   backfilling metrics across every historical activity for every athlete. Treat the job runner
@@ -586,7 +615,7 @@ Not decided in this task. Each one changes scope downstream.
 | 1 | Remove Strava completely, or keep it as a summary-only feed? | Strava cannot feed the matcher, but it is currently the only **automatic** ingestion path. Removing it makes manual FIT upload the sole route in. |
 | 2 | Running-only beta, or running + cycling? | Cycling authoring works; the cycling metric extractor is a thin wrapper over running with no dedicated tests. |
 | 3 | Support nested repeats? | The resolver already handles them; only the authoring validator blocks them. Affects builder UX and plan expressiveness. |
-| 4 | Plan templates — coach-owned, or platform-level? | Determines whether M2 needs a `PlanTemplate` entity in v1 or can defer it to a copy operation. |
+| 4 | Plan templates — coach-owned, or platform-level? | Deferred past M2 v1; determines whether a `PlanTemplate` entity is needed or a copy operation is enough. |
 | 5 | Step-level RPE? | Today RPE is workout-level only. Adding it changes the step schema and every consumer. |
 | 6 | Can an athlete self-plan without a coach? | Every training write path currently requires the coach role. Affects onboarding and the addressable market. |
 | 7 | Garmin Connect integration in future? | The natural answer to decision 1; changes how much effort manual FIT upload deserves. |
@@ -598,7 +627,9 @@ Not decided in this task. Each one changes scope downstream.
 ## 9. Technical debt
 
 Discovered during the 2026-08-13 audit. Items 1–5 (production storage, hardcoded score,
-narrow auto-link, missing manual link, missing re-match) were fixed in M0.
+narrow auto-link, missing manual link, missing re-match) were fixed in M0. Item 18
+(dead root `src/`, `migrations/`, `scripts/` directories containing only `__pycache__`)
+was cleaned up.
 
 | # | Item | Impact |
 |---|---|---|
@@ -609,10 +640,9 @@ narrow auto-link, missing manual link, missing re-match) were fixed in M0.
 | 10 | Discarded FIT session-level metrics | `avg_hr`, `max_hr`, `avg_power`, `normalized_power`, `threshold_power`, `elevation_gain/loss`, `calories`, `moving_time` are all parsed into `ActivityMeta` and never persisted. Also lap `max_power` / `normalized_power` and trackpoint `accumulated_power` / `motor_power`. |
 | 11 | Unreachable execution code | `insights.py` (the whole confidence-gating layer) has no route; `get_insights` has no caller; `WorkoutExecutionStatus.pending` / `.failed` and `StepExecutionStatus.partially_executed` / `.substituted` are never emitted. |
 | 12 | `ManualStrategy` not registered | Fully implemented segmentation strategy absent from `default_registry()` — free capability once a UI exists. |
-| 13 | Mock athlete context in coach UI | `coach/athlete/mockAthleteContext.ts` supplies fake mesocycle and trend data to the coach workspace and athlete roster. |
+| 13 | Mock athlete context in coach UI | `coach/athlete/mockAthleteContext.ts` still supplies fake mesocycle labels on the roster; Cycle Designer itself uses live planning APIs. |
 | 14 | No full FIT-import execution integration test | Persistence tests cover manual link, rematch idempotency, auto-link, and score aggregation. The FIT import hook itself still has no end-to-end test. `detect_issues` is imported by the matching test module but never exercised. |
 | 15 | Row-by-row track point inserts | One `db.add()` per FIT record — thousands per import. No `(activity_id, timestamp)` composite index. |
 | 16 | Unused schema | `coach_athlete_relations.permissions` (stored, returned, never enforced) and `workout_executions.extra_work` (never written). |
 | 17 | Orphaned frontend components | `CreateWorkoutForm`, `EditWorkoutModal`, `CoachMonthCalendar`, and the legacy `WorkoutBuilder` have no route and no live importer. |
-| 18 | Dead root directories | `src/`, `migrations/`, `scripts/` at the repository root contain only `__pycache__`. |
-| 19 | Destructive coach edits | `Workout.steps` is overwritten in place with no version history — the missing write-time foundation for M5's "learn from coach decisions". |
+| 19 | Destructive coach edits (workout steps) | `Workout.steps` is overwritten in place with no version history. Plan-structure mutations are logged in `plan_change_log` (M2); step-level decision history for M5 remains open. |

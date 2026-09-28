@@ -35,5 +35,14 @@ from src.modules.execution.models import (  # noqa: F401
     WorkoutPlanSnapshot,
     WorkoutStepExecution,
 )
+from src.modules.planning.models import (  # noqa: F401
+    CycleCoachReview,
+    CycleSystemAnalysis,
+    Mesocycle,
+    Microcycle,
+    PlanChangeLog,
+    PlanItem,
+    TrainingPlan,
+)
 
 __all__ = ["Base"]

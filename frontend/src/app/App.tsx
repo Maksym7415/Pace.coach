@@ -26,6 +26,7 @@ import { TodayPage } from "../modules/today/TodayPage";
 import { ActivityDetailsPage } from "../modules/activities/ActivityDetailsPage";
 import { AppLayout } from "../modules/shell/AppLayout";
 import { ComingSoonPage } from "../modules/shell/ComingSoonPage";
+import { AthletePlanPage as AthleteSelfPlanPage } from "../modules/athlete/AthletePlanPage";
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -114,7 +115,7 @@ export function App() {
           path="/plan"
           element={
             <RequireRole role="athlete">
-              <ComingSoonPage title="Plan" />
+              <AthleteSelfPlanPage />
             </RequireRole>
           }
         />

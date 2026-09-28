@@ -56,13 +56,23 @@ function PaceRangeInputs({ targetMin, targetMax, onChange }: PaceRangeInputsProp
     const trimmed = value.trim();
     if (!trimmed) {
       setDraft("");
-      onChange({ [field]: null, targetZoneId: null, targetZoneName: null });
+      onChange({
+        targetMin: field === "targetMin" ? null : targetMin,
+        targetMax: field === "targetMax" ? null : targetMax,
+        targetZoneId: null,
+        targetZoneName: null,
+      });
       return;
     }
     const secs = mmssToSecs(trimmed);
     if (secs != null) {
       setDraft(secsToMMSS(secs));
-      onChange({ [field]: secs, targetZoneId: null, targetZoneName: null });
+      onChange({
+        targetMin: field === "targetMin" ? secs : targetMin,
+        targetMax: field === "targetMax" ? secs : targetMax,
+        targetZoneId: null,
+        targetZoneName: null,
+      });
     }
   }
 
@@ -74,9 +84,19 @@ function PaceRangeInputs({ targetMin, targetMax, onChange }: PaceRangeInputsProp
     setDraft(value);
     const secs = mmssToSecs(value);
     if (secs != null) {
-      onChange({ [field]: secs, targetZoneId: null, targetZoneName: null });
+      onChange({
+        targetMin: field === "targetMin" ? secs : targetMin,
+        targetMax: field === "targetMax" ? secs : targetMax,
+        targetZoneId: null,
+        targetZoneName: null,
+      });
     } else if (!value.trim()) {
-      onChange({ [field]: null, targetZoneId: null, targetZoneName: null });
+      onChange({
+        targetMin: field === "targetMin" ? null : targetMin,
+        targetMax: field === "targetMax" ? null : targetMax,
+        targetZoneId: null,
+        targetZoneName: null,
+      });
     }
   }
 
@@ -89,7 +109,12 @@ function PaceRangeInputs({ targetMin, targetMax, onChange }: PaceRangeInputsProp
     const trimmed = value.trim();
     if (!trimmed) {
       setDraft("");
-      onChange({ [field]: null, targetZoneId: null, targetZoneName: null });
+      onChange({
+        targetMin: field === "targetMin" ? null : targetMin,
+        targetMax: field === "targetMax" ? null : targetMax,
+        targetZoneId: null,
+        targetZoneName: null,
+      });
       return;
     }
     if (mmssToSecs(trimmed) != null) {
