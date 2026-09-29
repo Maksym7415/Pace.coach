@@ -28,7 +28,9 @@ from src.modules.execution.domain import (
     SegmentMatch,
 )
 from src.modules.fit_parser import FitParser
-from src.modules.fit_parser.models import TrackPoint
+from src.modules.fit_parser.models import FitEvent, TrackPoint
+from src.modules.execution.domain import PauseInterval
+from src.modules.execution.pause_utils import extract_explicit_pause_intervals
 from src.modules.training.workout_steps import (
     DurationType,
     StepType,
@@ -39,6 +41,10 @@ from src.modules.training.workout_steps import (
 
 
 RESEARCH_FIT = Path("/Users/maksym/Downloads/23712955570_ACTIVITY.fit")
+PAUSE_REGRESSION_FIT = (
+    Path(__file__).resolve().parent.parent
+    / "storage/fit-uploads/91c4aaf2d2263fec3b0b4fed59a2cff001c9d924aa8511b8357fed58d8e4f5b1.fit"
+)
 
 
 def test_ensure_step_ids_mints_and_preserves():
@@ -367,6 +373,262 @@ def test_insights_suppress_quality_for_signal_strategy():
     claims = build_insights([match], issues)
     assert claims[0].suppressed is True
     assert claims[0].suppression_reason == "approximate_boundaries"
+
+
+def test_extract_explicit_pause_intervals_from_timer_events():
+    start = datetime(2026, 1, 1, 10, 0, 0)
+    markers = [
+        FitEvent(timestamp=start + timedelta(minutes=20), event="timer", event_type="stop_all"),
+        FitEvent(timestamp=start + timedelta(minutes=23), event="timer", event_type="start"),
+    ]
+    pauses = extract_explicit_pause_intervals(markers)
+    assert len(pauses) == 1
+    assert pauses[0].duration_s == pytest.approx(180.0)
+
+
+def test_no_explicit_pauses_metrics_use_full_active_wall_clock():
+    start = datetime(2026, 1, 1, 10, 0, 0)
+    points = [
+        TrackPoint(
+            timestamp=start + timedelta(seconds=i),
+            distance=float(i * 10),
+            pace=4.0,
+            speed=15.0,
+        )
+        for i in range(10)
+    ]
+    evidence = ActivityEvidence(
+        vendor="garmin",
+        timeline=points,
+        explicit_pauses=[],
+        capabilities={EvidenceCapability.timeline, EvidenceCapability.pace},
+    )
+    occurrence = ResolvedOccurrence(
+        authored_step_id="s1",
+        occurrence_path="0",
+        occurrence_ordinal=1,
+        step_type=StepType.warmup,
+        duration_type=DurationType.time,
+        duration_min=1,
+    )
+    window = ExecutionWindow(
+        started_at=start,
+        ended_at=start + timedelta(seconds=9),
+        authored_step_id="s1",
+        occurrence_path="0",
+        occurrence_ordinal=1,
+        confidence=0.9,
+    )
+    metrics = RunningMetricExtractor().extract(evidence, window, occurrence)
+    assert metrics.duration_elapsed_s == pytest.approx(9.0)
+    assert metrics.duration_moving_s == pytest.approx(9.0)
+
+
+def test_metric_extractor_excludes_explicit_pause_from_durations():
+    start = datetime(2026, 1, 1, 10, 0, 0)
+    pause_start = start + timedelta(minutes=20)
+    pause_end = start + timedelta(minutes=23)
+    points = []
+    for minute in range(24):
+        for sec in range(0, 60, 10):
+            ts = start + timedelta(minutes=minute, seconds=sec)
+            points.append(
+                TrackPoint(
+                    timestamp=ts,
+                    distance=float(minute * 100 + sec),
+                    pace=5.0,
+                    speed=12.0,
+                )
+            )
+    evidence = ActivityEvidence(
+        vendor="garmin",
+        timeline=points,
+        explicit_pauses=[
+            PauseInterval(started_at=pause_start, ended_at=pause_end),
+        ],
+        capabilities={EvidenceCapability.timeline, EvidenceCapability.pace},
+    )
+    occurrence = ResolvedOccurrence(
+        authored_step_id="warmup",
+        occurrence_path="0",
+        occurrence_ordinal=1,
+        step_type=StepType.warmup,
+        duration_type=DurationType.time,
+        duration_min=20,
+    )
+    window = ExecutionWindow(
+        started_at=start,
+        ended_at=pause_end,
+        authored_step_id="warmup",
+        occurrence_path="0",
+        occurrence_ordinal=1,
+        confidence=0.95,
+    )
+    metrics = RunningMetricExtractor().extract(evidence, window, occurrence)
+    assert metrics.duration_elapsed_s == pytest.approx(1200.0, rel=0.02)
+    assert metrics.duration_moving_s == pytest.approx(1200.0, rel=0.02)
+    score = score_occurrence(occurrence, metrics)
+    assert score.completion == pytest.approx(100.0, rel=0.02)
+
+
+def test_signal_strategy_time_steps_advance_in_active_time_across_pause():
+    start = datetime(2026, 1, 1, 10, 0, 0)
+    pause_start = start + timedelta(minutes=20)
+    pause_end = start + timedelta(minutes=23)
+    points = []
+    t = start
+    while t <= start + timedelta(minutes=35):
+        points.append(
+            TrackPoint(timestamp=t, distance=float(len(points) * 5), pace=5.0, speed=10.0)
+        )
+        t += timedelta(seconds=30)
+    evidence = ActivityEvidence(
+        vendor="unknown",
+        start_time=start,
+        timeline=points,
+        explicit_pauses=[
+            PauseInterval(started_at=pause_start, ended_at=pause_end),
+        ],
+        capabilities={EvidenceCapability.timeline, EvidenceCapability.pace},
+    )
+    steps = ensure_step_ids(
+        [
+            {"type": "warmup", "durationType": "time", "duration": 20},
+            {"type": "run", "durationType": "time", "duration": 10},
+        ]
+    )
+    plan = resolve_plan(steps, sport_code="running")
+    matches = SignalSegmentationStrategy().segment(evidence, plan)
+    assert len(matches) == 2
+    warmup, run = matches[0], matches[1]
+    assert warmup.window is not None and run.window is not None
+    warmup_metrics = RunningMetricExtractor().extract(
+        evidence, warmup.window, plan.occurrences[0]
+    )
+    run_metrics = RunningMetricExtractor().extract(
+        evidence, run.window, plan.occurrences[1]
+    )
+    assert warmup_metrics.duration_elapsed_s == pytest.approx(1200.0, rel=0.05)
+    assert run_metrics.duration_elapsed_s == pytest.approx(600.0, rel=0.08)
+    assert run.window.started_at >= pause_end - timedelta(seconds=60)
+
+
+def test_multiple_explicit_pauses_all_excluded_from_step_duration():
+    start = datetime(2026, 1, 1, 10, 0, 0)
+    pauses = [
+        PauseInterval(
+            started_at=start + timedelta(minutes=5),
+            ended_at=start + timedelta(minutes=6),
+        ),
+        PauseInterval(
+            started_at=start + timedelta(minutes=12),
+            ended_at=start + timedelta(minutes=14),
+        ),
+    ]
+    points = [
+        TrackPoint(
+            timestamp=start + timedelta(seconds=i),
+            distance=float(i),
+            speed=10.0,
+        )
+        for i in range(0, 20 * 60 + 1, 5)
+    ]
+    evidence = ActivityEvidence(
+        vendor="garmin",
+        timeline=points,
+        explicit_pauses=pauses,
+        capabilities={EvidenceCapability.timeline},
+    )
+    window = ExecutionWindow(
+        started_at=start,
+        ended_at=start + timedelta(minutes=20),
+        authored_step_id="s1",
+        occurrence_path="0",
+        occurrence_ordinal=1,
+        confidence=0.9,
+    )
+    occurrence = ResolvedOccurrence(
+        authored_step_id="s1",
+        occurrence_path="0",
+        occurrence_ordinal=1,
+        step_type=StepType.warmup,
+        duration_type=DurationType.time,
+        duration_min=20,
+    )
+    metrics = RunningMetricExtractor().extract(evidence, window, occurrence)
+    # 20 min wall clock minus 1 min and 2 min pauses
+    assert metrics.duration_elapsed_s == pytest.approx(17 * 60.0, rel=0.01)
+
+
+def test_zero_speed_without_timer_events_does_not_infer_pause():
+    start = datetime(2026, 1, 1, 10, 0, 0)
+    points = [
+        TrackPoint(timestamp=start, distance=0.0, speed=0.0),
+        TrackPoint(timestamp=start + timedelta(minutes=3), distance=0.0, speed=0.0),
+        TrackPoint(timestamp=start + timedelta(minutes=6), distance=10.0, speed=8.0),
+    ]
+    markers = [FitEvent(timestamp=start + timedelta(minutes=1), event="workout", event_type="step")]
+    evidence = ActivityEvidence(
+        vendor="garmin",
+        timeline=points,
+        markers=markers,
+        explicit_pauses=extract_explicit_pause_intervals(markers),
+        capabilities={EvidenceCapability.timeline},
+    )
+    assert evidence.explicit_pauses == []
+    window = ExecutionWindow(
+        started_at=start,
+        ended_at=start + timedelta(minutes=6),
+        authored_step_id="s1",
+        occurrence_path="0",
+        occurrence_ordinal=1,
+        confidence=0.9,
+    )
+    occurrence = ResolvedOccurrence(
+        authored_step_id="s1",
+        occurrence_path="0",
+        occurrence_ordinal=1,
+        step_type=StepType.warmup,
+        duration_type=DurationType.time,
+        duration_min=6,
+    )
+    metrics = RunningMetricExtractor().extract(evidence, window, occurrence)
+    assert metrics.duration_elapsed_s == pytest.approx(360.0)
+
+
+@pytest.mark.skipif(not PAUSE_REGRESSION_FIT.exists(), reason="pause regression FIT not available")
+def test_regression_fit_warmup_active_duration_excludes_explicit_pause():
+    normalized = FitParser.parse(PAUSE_REGRESSION_FIT.read_bytes())
+    evidence = GarminEvidenceAdapter().adapt(normalized, activity_id=17)
+    assert len(evidence.explicit_pauses) >= 1
+    assert evidence.explicit_pauses[0].duration_s == pytest.approx(198.0, rel=0.02)
+
+    warmup_segment = evidence.segments[0]
+    assert warmup_segment.duration_moving_s == pytest.approx(1200.0, rel=0.02)
+
+    started = warmup_segment.start_time
+    assert started is not None
+    ended = warmup_segment.end_time
+    assert ended is not None
+    window = ExecutionWindow(
+        started_at=started,
+        ended_at=ended,
+        authored_step_id="warmup",
+        occurrence_path="0",
+        occurrence_ordinal=1,
+        confidence=0.95,
+    )
+    occurrence = ResolvedOccurrence(
+        authored_step_id="warmup",
+        occurrence_path="0",
+        occurrence_ordinal=1,
+        step_type=StepType.warmup,
+        duration_type=DurationType.time,
+        duration_min=20,
+    )
+    metrics = RunningMetricExtractor().extract(evidence, window, occurrence)
+    assert metrics.duration_elapsed_s == pytest.approx(1200.0, rel=0.02)
+    assert metrics.duration_moving_s == pytest.approx(1200.0, rel=0.02)
 
 
 def test_signal_strategy_segments_by_planned_distance():

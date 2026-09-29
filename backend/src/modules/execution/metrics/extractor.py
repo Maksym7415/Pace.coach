@@ -8,8 +8,14 @@ from src.modules.execution.domain import (
     ActivityEvidence,
     ExecutionMetrics,
     ExecutionWindow,
+    PauseInterval,
     ResolvedOccurrence,
     ordered_target_bounds,
+)
+from src.modules.execution.pause_utils import (
+    active_seconds_between,
+    pause_overlap_seconds,
+    timestamp_in_explicit_pause,
 )
 from src.modules.fit_parser.models import TrackPoint
 from src.modules.training.workout_steps import TargetType
@@ -74,10 +80,11 @@ class RunningMetricExtractor(MetricExtractor):
         occurrence: ResolvedOccurrence,
     ) -> ExecutionMetrics:
         points = _points_in_window(evidence.timeline, window.started_at, window.ended_at)
-        elapsed_s = (window.ended_at - window.started_at).total_seconds()
+        pauses = evidence.explicit_pauses
+        elapsed_s = active_seconds_between(pauses, window.started_at, window.ended_at)
 
-        # Moving time: sum inter-point deltas where speed suggests movement
-        moving_s = _moving_time_s(points)
+        # Moving time: inter-point deltas minus explicit pauses; speed filter is not pause inference
+        moving_s = _moving_time_s(points, pauses)
         if moving_s is None:
             moving_s = elapsed_s
 
@@ -147,7 +154,8 @@ class RunningMetricExtractor(MetricExtractor):
         target = occurrence.target
         if target.target_type and target.target_type != TargetType.none:
             target_metric = target.target_type.value
-            series = _target_series(points, target.target_type)
+            active_points = _points_excluding_explicit_pauses(points, pauses)
+            series = _target_series(active_points, target.target_type)
             bounds = ordered_target_bounds(target.target_min, target.target_max)
             if series and bounds is not None:
                 lo, hi = bounds
@@ -170,9 +178,27 @@ class RunningMetricExtractor(MetricExtractor):
         )
 
 
-def _moving_time_s(points: list[TrackPoint]) -> float | None:
+def _points_excluding_explicit_pauses(
+    points: list[TrackPoint],
+    pauses: list[PauseInterval],
+) -> list[TrackPoint]:
+    if not pauses:
+        return points
+    return [
+        p
+        for p in points
+        if p.timestamp is not None
+        and not timestamp_in_explicit_pause(p.timestamp, pauses)
+    ]
+
+
+def _moving_time_s(
+    points: list[TrackPoint],
+    pauses: list[PauseInterval] | None = None,
+) -> float | None:
     if len(points) < 2:
         return None
+    pause_list = pauses or []
     total = 0.0
     for a, b in zip(points, points[1:]):
         if a.timestamp is None or b.timestamp is None:
@@ -180,7 +206,10 @@ def _moving_time_s(points: list[TrackPoint]) -> float | None:
         dt = (b.timestamp - a.timestamp).total_seconds()
         if dt <= 0:
             continue
-        # Treat near-zero speed as paused
+        dt -= pause_overlap_seconds(pause_list, a.timestamp, b.timestamp)
+        if dt <= 0:
+            continue
+        # Treat near-zero speed as stopped (not an inferred activity pause)
         speed = b.speed if b.speed is not None else a.speed
         if speed is not None and speed < 0.5:  # km/h
             continue

@@ -7,7 +7,8 @@ from typing import Any
 from src.modules.execution.adapters.base import DevicePlanExtractor, EvidenceAdapter
 from src.modules.execution.domain import ActivityEvidence, EvidenceSegment
 from src.modules.execution.enums import EvidenceCapability
-from src.modules.fit_parser.models import DeviceWorkout, NormalizedActivity, TrackPoint
+from src.modules.execution.pause_utils import extract_explicit_pause_intervals
+from src.modules.fit_parser.models import DeviceWorkout, FitEvent, NormalizedActivity, TrackPoint
 
 
 def _segment_end_time(start, duration_s: float | None):
@@ -61,6 +62,7 @@ class GarminEvidenceAdapter(EvidenceAdapter):
             if any(p.cadence is not None for p in normalized.track_points):
                 capabilities.add(EvidenceCapability.cadence)
 
+        events = list(normalized.events)
         return ActivityEvidence(
             vendor=self.vendor,
             activity_id=activity_id,
@@ -69,7 +71,8 @@ class GarminEvidenceAdapter(EvidenceAdapter):
             sport=normalized.meta.sport,
             segments=segments,
             timeline=list(normalized.track_points),
-            markers=list(normalized.events),
+            markers=events,
+            explicit_pauses=extract_explicit_pause_intervals(events),
             device_plan=normalized.device_workout,
             capabilities=capabilities,
         )

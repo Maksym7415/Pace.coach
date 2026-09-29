@@ -27,6 +27,17 @@ class EvidenceSegment(BaseModel):
     intensity: str | None = None
 
 
+class PauseInterval(BaseModel):
+    """Explicit activity pause from device timer stop/start events."""
+
+    started_at: datetime
+    ended_at: datetime
+
+    @property
+    def duration_s(self) -> float:
+        return (self.ended_at - self.started_at).total_seconds()
+
+
 class ActivityEvidence(BaseModel):
     """Vendor-normalized facts extracted from a device file. Input to matching."""
 
@@ -38,6 +49,7 @@ class ActivityEvidence(BaseModel):
     segments: list[EvidenceSegment] = Field(default_factory=list)
     timeline: list[TrackPoint] = Field(default_factory=list)
     markers: list[FitEvent] = Field(default_factory=list)
+    explicit_pauses: list[PauseInterval] = Field(default_factory=list)
     device_plan: DeviceWorkout | None = None
     capabilities: set[EvidenceCapability] = Field(default_factory=set)
 

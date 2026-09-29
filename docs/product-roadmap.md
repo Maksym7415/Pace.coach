@@ -3,9 +3,8 @@
 > **Canonical source of truth** for product direction, current state, and implementation
 > sequencing. Living document — update it in the same PR that changes the reality it describes.
 >
-> Last verified against code: **2026-09-28** (M2 domain/API landed; small UI follow-ups remain).
+> Last verified against code: **2026-09-28** (M2 domain/API landed; M1 coach half still open; small M2 UI follow-ups remain).
 > Companion document: [`execution-architecture.md`](./execution-architecture.md).
-> M2 detail: [`m2-cycle-designer-plan.md`](./m2-cycle-designer-plan.md).
 
 ## Status legend
 
@@ -93,8 +92,8 @@ today cannot be recovered later.
 | Activities | `DONE` | List + calendar, date-ranged, real API, links to detail. |
 | Activity detail | `PARTIAL` | Summary and execution sections real. Charts, zone distribution, insights and coach notes are placeholders. |
 | Planned vs Actual | `DONE` | `PlannedVsActual.tsx` renders real `WorkoutExecution` data — when an execution exists. |
-| Workout Review | `PARTIAL` | Issue questionnaire renders real issues and persists responses. "Discussion" panel is a stub. |
-| Athlete feedback | `PARTIAL` | One athlete response per `ExecutionIssue`, overwritable, no thread, no coach reply. |
+| Workout Review | `PARTIAL` | Issue questionnaire renders real issues and persists athlete responses (**foundation for M1**). "Discussion" panel is still a stub — no coach reply, no resolution. |
+| Athlete feedback | `DONE` (athlete half) | One athlete response per `ExecutionIssue` (reason / other / notes / responded_at), overwritable. No thread, no coach reply — that is M1. |
 | Recovery | `PARTIAL` | The `/recovery` nav route is a `ComingSoonPage`. The real check-in lives on Today and is fully wired, with a computed `readiness_score`. |
 | Performance | `PLACEHOLDER` | `/performance` redirects to the profile page (thresholds, zones, body metrics). No trends, no progress, no history. |
 
@@ -106,8 +105,9 @@ today cannot be recovered later.
 | Cycle Designer / Training Plan | `PARTIAL` | Domain + API + coach/athlete Cycle Designer UI are live (`/api/planning/...`). Coach can design mesocycles, microcycles, and PlanItems; convert placeholders to workouts; run cycle review. **Follow-ups:** Placement UI in Designer (unplaced / Day N / specific date) and Calendar presentation of placeholders — see M2. |
 | Individual Workout Builder | `DONE` | Three-pane builder (Library / Canvas / Inspector) with intent bar. Step types gated by sport, time/distance/lap-button durations, pace/HR/power/cadence targets, real zone integration, single-level repeats, templates, client validation. Builder can open from a PlanItem via builder-context. |
 | Workout assignment | `DONE` | `POST /api/training/workouts/assign`, athletes × dates, capped at 50 server-side. Ad-hoc assignment remains; plan-attached workouts also flow through planning attach/create. |
-| Activity review | `PARTIAL` | Coach opens the **same** `/activity/:id` page as the athlete and can read saved athlete responses. No coach-specific review UI, no reply, no "mark reviewed" (button is disabled). |
-| Coach ↔ athlete communication | `MISSING` | No table, no API, no UI. Every entry point is a disabled button or "coming soon". |
+| Activity review | `PARTIAL` | Coach opens the **same** `/activity/:id` page as the athlete and can **read** saved athlete responses. No coach-specific review UI, no reply, no resolution, no "mark reviewed" (button disabled). That coach half is M1. |
+| Coach Today attention queue | `PARTIAL` | Real signals for skipped sessions, missing recovery, low readiness, no planned session. **Not** an unreviewed-execution review queue (M1). |
+| Coach ↔ athlete communication | `MISSING` | No comment/thread table, no coach-reply API, no Discussion UI. Entry points are disabled buttons or "coming soon". Entirely M1. |
 
 ### Execution
 
@@ -120,7 +120,7 @@ today cannot be recovered later.
 | `WorkoutStepExecution` | `DONE` | One row per planned occurrence, keyed `(authored_step_id, occurrence_ordinal)`. |
 | `ExecutionIssue` | `DONE` | 8 issue codes with real detection rules and thresholds. |
 | Execution scoring | `DONE` | Per-step scores plus a session aggregate (`aggregate_execution_score`: mean of non-null step scores, 1 decimal) exposed on `WorkoutExecutionOut` and the training calendar. Unscored sessions show no score. |
-| Workout Review | `DONE` (data path) | Consumes real execution data via `GET /api/activities/{id}/workout-execution`. |
+| Workout Review | `DONE` (athlete data path) | Consumes real execution data via `GET /api/activities/{id}/workout-execution`. Athlete responses persist. Coach reply / resolution / review queue are M1. |
 
 ---
 
@@ -348,7 +348,7 @@ These are **`MISSING`**, not partial. Nothing in the schema represents them:
 | Concept | Consequence |
 |---|---|
 | Race / Goal Event entity | `goal_event_date` on `TrainingPlan` is a date field only. `race_pace` remains a `WorkoutType` enum value, not a goal object. |
-| Coach ↔ athlete conversation | No comment, message, or thread table anywhere. |
+| Coach ↔ athlete conversation | No comment, message, or thread table. No issue resolution state. No coach-reviewed flag on executions. (M1) |
 | Coach decision history (workout edits) | `Workout.steps` is still destructively overwritten on edit. Plan-structure changes are logged in `plan_change_log`; workout-step edits are not. |
 | Activity-level performance metrics | No per-activity rollup table. HR drift and pace variability are computed **only inside matched workout step windows**; unmatched and unstructured activities produce nothing analyzable. |
 | Performance trends | No trend, baseline sample, or performance event storage. |
@@ -412,22 +412,36 @@ Double days used to make auto-link return `None` permanently; that was why M0 ha
 
 ### M1 — Coach ↔ Athlete Feedback · `FUTURE`
 
-Build the next layer of the Workout Review concept:
+Close the Workout Review loop on the **coach side**. The athlete half already ships; M1 is
+almost entirely the missing coach half — **not** nearly done.
 
 ```
 ExecutionIssue  →  Athlete response  →  Coach response  →  Resolution / Outcome
+       ▲                  ▲                    ✕                    ✕
+   (exists)         (EXISTS — done)         (M1)                 (M1)
 ```
 
-**Scope**
+**Foundation already shipped (not counted as M1 remaining work)**
 
-- Coaching comments attachable to an execution, a step execution, or an issue
-- Coach replies surfaced in the review drawer (replacing the "Discussion" stub)
-- Issue resolution state (`open` / `acknowledged` / `resolved` / `dismissed`)
-- Coach Today review queue backed by real unreviewed executions
+| Item | Reality |
+|---|---|
+| `ExecutionIssue` detection | 8 codes, real thresholds, persisted with executions |
+| Athlete response | One response per issue (`athlete_reason` / `other` / `notes` / `responded_at`), overwritable via `POST .../athlete-responses` |
+| Workout Review questionnaire UI | Athlete drawer renders real issues and saves responses |
+| Coach read path | Coach can open the same activity page and see saved athlete responses |
 
-**Why it matters:** this is the mechanism that turns per-activity conversation into retained
-coaching history, and it is the foundation M5 retrieves from. Today the chain stops at the
-athlete response — there is no coach side and no outcome.
+**Still to build (actual M1 scope)**
+
+| Item | Status | Note |
+|---|---|---|
+| Coaching comments | `MISSING` | Attachable to an execution, a step execution, or an issue. No comment/thread table or API today. |
+| Coach replies in Discussion drawer | `MISSING` | Replace the "Discussion · coming soon" stub in `WorkoutReviewDrawer`. |
+| Issue resolution state | `MISSING` | `open` / `acknowledged` / `resolved` / `dismissed` — no status column on `ExecutionIssue`. |
+| Coach Today review queue | `MISSING` | Queue of **unreviewed executions** (with athlete responses waiting on coach). Today's attention queue is recovery/plan-based, not review-based. "Mark reviewed" remains disabled. |
+
+**Why it matters:** this turns per-activity conversation into retained coaching history, and it
+is the foundation M5 retrieves from. Without M1, the chain stops at the athlete response —
+there is no coach side and no outcome.
 
 *Do not implement now.*
 
@@ -578,7 +592,7 @@ that history will not exist when M5 arrives.
               ┌─────────────────────┼─────────────────────┐
               │                     │                     │
    M1 — Coach ↔ Athlete    M2 — Training Plans /    M3 — Activity Metrics
-        Feedback                Cycles  [DONE]*           & Baselines
+        Feedback*               Cycles  [DONE]**          & Baselines
       (parallel foundation)         │                     │
               │                     └──────────┬──────────┘
               │                                │
@@ -589,14 +603,18 @@ that history will not exist when M5 arrives.
                         M5 — AI Coach
 ```
 
-\* M2 domain/API/Designer are done. Remaining UI follow-ups: Placement UI in Designer;
+\* M1 athlete-response foundation already ships. Remaining work is the coach half: comments,
+Discussion replies, issue resolution states, unreviewed-execution review queue.
+
+\*\* M2 domain/API/Designer are done. Remaining UI follow-ups: Placement UI in Designer;
 Calendar placeholder presentation. These do not block M1/M3/M4.
 
 Notes:
 
-- **M0 and M2 (core) are done.** M1 and M3 are mutually independent and may be reordered or parallelized.
+- **M0 and M2 (core) are done.** M1 (coach half) and M3 are mutually independent and may be reordered or parallelized.
 - **M1 is a parallel foundation, not a blocker for M3.** It feeds M5 directly: without
-  coach responses and outcomes, the AI has no coaching history to retrieve.
+  coach responses and outcomes, the AI has no coaching history to retrieve. Do not treat
+  athlete responses alone as “M1 done.”
 - **M4 requires both M2 and M3** — trends need metrics, and interpreting them needs plan
   context. M2's remaining UI follow-ups are not a prerequisite for starting M3 or M4 design.
 - **M3 requires a scalable background job mechanism.** The current approach (FastAPI

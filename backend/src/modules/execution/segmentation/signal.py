@@ -15,6 +15,7 @@ from src.modules.execution.domain import (
     ordered_target_bounds,
 )
 from src.modules.execution.enums import EvidenceCapability, StepExecutionStatus
+from src.modules.execution.pause_utils import pause_overlap_seconds, timestamp_in_explicit_pause
 from src.modules.execution.segmentation.base import SegmentationStrategy
 from src.modules.fit_parser.models import TrackPoint
 from src.modules.training.workout_steps import DurationType, TargetType
@@ -88,6 +89,9 @@ class SignalSegmentationStrategy(SegmentationStrategy):
         assert activity_start is not None
 
         for occurrence in plan.occurrences:
+            cursor = self._skip_explicit_pause_points(
+                timeline, cursor, evidence.explicit_pauses
+            )
             if cursor >= len(timeline):
                 matches.append(
                     SegmentMatch(
@@ -115,7 +119,9 @@ class SignalSegmentationStrategy(SegmentationStrategy):
             started = timeline[cursor].timestamp
             assert started is not None
 
-            end_cursor = self._find_end_index(timeline, cursor, occurrence)
+            end_cursor = self._find_end_index(
+                timeline, cursor, occurrence, evidence.explicit_pauses
+            )
             if end_cursor is None or end_cursor < cursor:
                 matches.append(
                     SegmentMatch(
@@ -187,14 +193,31 @@ class SignalSegmentationStrategy(SegmentationStrategy):
                 )
             )
             cursor = end_cursor + 1
+            cursor = self._skip_explicit_pause_points(
+                timeline, cursor, evidence.explicit_pauses
+            )
 
         return matches
+
+    @staticmethod
+    def _skip_explicit_pause_points(
+        timeline: list[TrackPoint],
+        cursor: int,
+        explicit_pauses: list,
+    ) -> int:
+        while cursor < len(timeline):
+            ts = timeline[cursor].timestamp
+            if ts is None or not timestamp_in_explicit_pause(ts, explicit_pauses):
+                break
+            cursor += 1
+        return cursor
 
     def _find_end_index(
         self,
         timeline: list[TrackPoint],
         start_i: int,
         occurrence: ResolvedOccurrence,
+        explicit_pauses: list,
     ) -> int | None:
         start_ts = timeline[start_i].timestamp
         if start_ts is None:
@@ -202,14 +225,18 @@ class SignalSegmentationStrategy(SegmentationStrategy):
 
         planned_s = _planned_duration_s(occurrence)
         if planned_s is not None:
-            target_end = start_ts + timedelta(seconds=planned_s)
+            active_elapsed = 0.0
             end_i = start_i
-            for i in range(start_i, len(timeline)):
+            for i in range(start_i + 1, len(timeline)):
+                prev_ts = timeline[i - 1].timestamp
                 ts = timeline[i].timestamp
-                if ts is None:
+                if prev_ts is None or ts is None:
                     continue
+                dt = (ts - prev_ts).total_seconds()
+                dt -= pause_overlap_seconds(explicit_pauses, prev_ts, ts)
+                active_elapsed += max(0.0, dt)
                 end_i = i
-                if ts >= target_end:
+                if active_elapsed >= planned_s:
                     return i
             return end_i
 
